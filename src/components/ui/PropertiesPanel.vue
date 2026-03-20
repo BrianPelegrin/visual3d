@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <transition name="panel-slide">
     <div v-if="appMode === 'edit' && selectedBuilding && !re_isViewer()" 
          class="properties-panel-glass shadow-lg d-flex flex-column"
@@ -46,6 +46,16 @@
               <div class="coord-input">
                 <span>Z</span>
                 <input type="number" step="1" v-model.number="buildingPositionZ" @input="updatePos" />
+              </div>
+            </div>
+          </div>
+
+          <div class="glass-input-group mt-3">
+            <label class="glass-label">Rotación del Edificio</label>
+            <div class="rotation-control">
+              <input type="range" min="0" max="359" step="1" v-model.number="buildingRotationY" @input="updateRotation" />
+              <div class="rotation-readout">
+                <span>{{ buildingRotationY }}°</span>
               </div>
             </div>
           </div>
@@ -197,6 +207,7 @@ const closePanel = () => {
 // Local bindings for Building editing
 const buildingPositionX = ref(0);
 const buildingPositionZ = ref(0);
+const buildingRotationY = ref(0);
 
 const buildingName = computed({
     get: () => selectedBuilding.value?.name || '',
@@ -211,6 +222,7 @@ watch(selectedBuilding, (val) => {
   if (val) {
     buildingPositionX.value = val.position.x;
     buildingPositionZ.value = val.position.z;
+    buildingRotationY.value = val.rotationY ?? 0;
   }
 }, { immediate: true });
 
@@ -219,6 +231,14 @@ const updatePos = () => {
         updateBuildingPosition(selectedBuildingId.value, { 
             x: buildingPositionX.value, 
             z: buildingPositionZ.value 
+        });
+    }
+};
+
+const updateRotation = () => {
+    if (selectedBuildingId.value) {
+        updateBuilding(selectedBuildingId.value, {
+            rotationY: buildingRotationY.value
         });
     }
 };
@@ -479,6 +499,46 @@ const handleConfirm = () => {
   gap: 12px;
 }
 
+.rotation-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.rotation-control input[type='range'] {
+  flex: 1;
+}
+
+.rotation-readout {
+  min-width: 56px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(59, 130, 246, 0.1);
+  color: #1d4ed8;
+  font-weight: 700;
+  text-align: center;
+}
+
+.rotation-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.rotation-control input[type='range'] {
+  flex: 1;
+}
+
+.rotation-readout {
+  min-width: 52px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(59, 130, 246, 0.1);
+  color: #1d4ed8;
+  font-weight: 700;
+  text-align: center;
+}
+
 .coord-input {
   display: flex;
   align-items: center;
@@ -706,4 +766,7 @@ const handleConfirm = () => {
   opacity: 0;
 }
 </style>
+
+
+
 

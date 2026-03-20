@@ -1,15 +1,325 @@
 import { reactive } from 'vue';
 import type { Building, Unit, UnitStatus, User, Project, DetailedUnit } from '../models/types';
-import rawUnitData from '../assets/nt8-proyect-buildings.json';
 
-// Process unit data to ensure unique IDs (since they are 0 in the JSON)
-const unitData: DetailedUnit[] = (rawUnitData as any[]).map((u, index) => ({
-    ...u,
-    id: index + 1
-}));
+type AuthResponse = {
+    user: User;
+    accessToken: string;
+    refreshToken: string;
+};
+
+type AuthSession = {
+    user: User;
+    accessToken: string | null;
+    refreshToken: string | null;
+};
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5153/api';
+const AUTH_STORAGE_KEY = 'auth_session';
+let authInitializationPromise: Promise<void> | null = null;
+let projectsLoadPromise: Promise<Project[]> | null = null;
+let usersLoadPromise: Promise<User[]> | null = null;
+let availableProjectIdsLoadPromise: Promise<string[]> | null = null;
+
+const persistAuthSession = (session: AuthSession) => {
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+};
+
+const applyAuthSession = (session: AuthSession) => {
+    appStore.currentUser = session.user;
+    appStore.accessToken = session.accessToken;
+    appStore.refreshToken = session.refreshToken;
+    appStore.isAuthenticated = true;
+};
+
+const readAuthSession = (): AuthSession | null => {
+    const savedSession = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!savedSession) return null;
+
+    try {
+        const session = JSON.parse(savedSession) as Partial<AuthSession>;
+        const normalizedUser = normalizeUserResponse(session.user);
+        if (!normalizedUser) return null;
+
+        return {
+            user: normalizedUser,
+            accessToken: session.accessToken ?? null,
+            refreshToken: session.refreshToken ?? null
+        };
+    } catch (_e) {
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+        return null;
+    }
+};
+
+const normalizeUserResponse = (payload: unknown): User | null => {
+    if (!payload || typeof payload !== 'object') return null;
+
+    const candidate = payload as { user?: Partial<User> & { id?: unknown } } & Partial<User> & { id?: unknown };
+
+    const normalizeId = (value: unknown): number | null => {
+        if (typeof value === 'number' && Number.isFinite(value)) return value;
+        if (typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Number(value))) {
+            return Number(value);
+        }
+        if (typeof value === 'string') {
+            const digitMatch = value.match(/\d+/g);
+            if (digitMatch) {
+                const parsed = Number(digitMatch.join(''));
+                return Number.isFinite(parsed) ? parsed : null;
+            }
+        }
+        return null;
+    };
+
+    if (candidate.user && candidate.user.id != null) {
+        const normalizedId = normalizeId(candidate.user.id);
+        if (normalizedId === null) return null;
+        return {
+            ...(candidate.user as User),
+            id: normalizedId
+        };
+    }
+
+    const normalizedId = normalizeId(candidate.id);
+    if (normalizedId !== null && candidate.name && candidate.email && candidate.role) {
+        return {
+            ...(candidate as User),
+            id: normalizedId
+        };
+    }
+
+    return null;
+};
+
+const getAuthHeaders = () => {
+    const headers: Record<string, string> = {};
+    if (appStore.accessToken) {
+        headers.Authorization = `Bearer ${appStore.accessToken}`;
+    }
+    return headers;
+};
+
+const syncProjectsState = (projects: Project[]) => {
+    appStore.projects = projects;
+    appStore.availableProjectIds = projects.map(project => project.id);
+};
+
+const syncProjectLayoutState = (projectId: string, buildings: Building[], gridSize?: number) => {
+    const preservedBuildings = appStore.buildings.filter(building => building.projectId !== projectId);
+    appStore.buildings = [...preservedBuildings, ...buildings];
+
+    if (typeof gridSize === 'number') {
+        appStore.gridSize = gridSize;
+    }
+};
+
+const clearProjectLayoutState = (projectId: string) => {
+    appStore.buildings = appStore.buildings.filter(building => building.projectId !== projectId);
+};
+
+const clearProjectApartmentState = () => {
+    appStore.detailedUnits = [];
+};
+
+const normalizeProjectsResponse = (payload: unknown): Project[] => {
+    if (Array.isArray(payload)) {
+        return payload as Project[];
+    }
+
+    if (!payload || typeof payload !== 'object') {
+        return [];
+    }
+
+    const candidate = payload as {
+        projects?: Project[];
+        data?: Project[];
+        items?: Project[];
+        result?: Project[];
+    };
+
+    return candidate.projects
+        ?? candidate.data
+        ?? candidate.items
+        ?? candidate.result
+        ?? [];
+};
+
+const normalizeUsersResponse = (payload: unknown): User[] => {
+    if (Array.isArray(payload)) {
+        return payload as User[];
+    }
+
+    if (!payload || typeof payload !== 'object') {
+        return [];
+    }
+
+    const candidate = payload as {
+        users?: User[];
+        data?: User[];
+        items?: User[];
+        result?: User[];
+    };
+
+    return candidate.users
+        ?? candidate.data
+        ?? candidate.items
+        ?? candidate.result
+        ?? [];
+};
+
+const normalizeStringListResponse = (payload: unknown): string[] => {
+    if (Array.isArray(payload)) {
+        return payload.filter(item => typeof item === 'string') as string[];
+    }
+
+    if (!payload || typeof payload !== 'object') {
+        return [];
+    }
+
+    const candidate = payload as {
+        sheets?: unknown;
+        data?: unknown;
+        items?: unknown;
+        result?: unknown;
+    };
+
+    const possibleLists = [
+        candidate.sheets,
+        candidate.data,
+        candidate.items,
+        candidate.result
+    ];
+
+    for (const list of possibleLists) {
+        if (Array.isArray(list)) {
+            return list.filter(item => typeof item === 'string') as string[];
+        }
+    }
+
+    return [];
+};
+
+const normalizeProjectResponse = (payload: unknown): Project | null => {
+    if (!payload || typeof payload !== 'object') {
+        return null;
+    }
+
+    const candidate = payload as { project?: Project } & Partial<Project>;
+
+    if (candidate.project && candidate.project.id) {
+        return candidate.project;
+    }
+
+    if (candidate.id && candidate.nombre && candidate.direccion && candidate.provincia && candidate.municipio && candidate.imagenPlano !== undefined) {
+        return candidate as Project;
+    }
+
+    return null;
+};
+
+type ProjectLayoutResponse = {
+    projectId?: string;
+    gridSize?: number;
+    buildings?: Building[];
+    layout?: {
+        gridSize?: number;
+        buildings?: Building[];
+    };
+};
+
+const normalizeLayoutResponse = (payload: unknown): { gridSize?: number; buildings: Building[] } => {
+    if (!payload || typeof payload !== 'object') {
+        return { buildings: [] };
+    }
+
+    const candidate = payload as ProjectLayoutResponse;
+    const source = candidate.layout ?? candidate;
+    const buildings = Array.isArray(source.buildings) ? source.buildings : [];
+
+    return {
+        gridSize: source.gridSize,
+        buildings: buildings.map((building) => ({
+            ...building,
+            projectId: building.projectId ?? candidate.projectId ?? appStore.currentProjectId ?? '',
+            rotationY: building.rotationY ?? 0,
+            units: Array.isArray(building.units)
+                ? building.units.map((unit) => ({
+                    ...unit,
+                    buildingId: unit.buildingId ?? building.id
+                }))
+                : []
+        }))
+    };
+};
+
+const normalizeDetailedUnitsResponse = (payload: unknown): DetailedUnit[] => {
+    if (Array.isArray(payload)) {
+        return payload as DetailedUnit[];
+    }
+
+    if (!payload || typeof payload !== 'object') {
+        return [];
+    }
+
+    const candidate = payload as {
+        apartments?: DetailedUnit[];
+        detailedUnits?: DetailedUnit[];
+        data?: DetailedUnit[];
+        items?: DetailedUnit[];
+        result?: DetailedUnit[];
+    };
+
+    return candidate.apartments
+        ?? candidate.detailedUnits
+        ?? candidate.data
+        ?? candidate.items
+        ?? candidate.result
+        ?? [];
+};
+
+const getApartmentCandidates = (building: Building, unit: Unit) => {
+    const rawName = unit.name?.trim() || '';
+    const buildingName = building.name?.trim() || '';
+    const compactBuildingName = buildingName.replace(/^bloque\s+/i, '').replace(/^torre\s+/i, '').trim();
+
+    return new Set([
+        unit.codUnidad,
+        unit.detailedUnitCode,
+        unit.externalUnitCode,
+        rawName,
+        `${building.projectId}-${rawName}`,
+        `${building.id}-${rawName}`,
+        `${compactBuildingName}-${rawName}`,
+        `${buildingName}-${rawName}`,
+        `${building.projectId}-${compactBuildingName}-${rawName}`,
+        `${building.projectId}-${compactBuildingName}`,
+        rawName.includes(' ') ? rawName.replace(/\s+/g, '-') : rawName
+    ].filter((value): value is string => Boolean(value)));
+};
+
+const linkProjectApartmentsToLayout = (projectId: string) => {
+    const projectBuildings = appStore.buildings.filter(building => building.projectId === projectId);
+
+    projectBuildings.forEach(building => {
+        building.units.forEach(unit => {
+            const candidates = getApartmentCandidates(building, unit);
+            const matchedApartment = appStore.detailedUnits.find(apartment => {
+                const apartmentKey = `${apartment.edificio}-${apartment.unidad}`;
+                return candidates.has(apartment.codUnidad)
+                    || candidates.has(apartmentKey)
+                    || candidates.has(apartment.codUnidad?.trim())
+                    || apartment.codUnidad.includes(building.projectId)
+                    || apartmentKey === unit.name;
+            });
+
+            unit.detailedUnitId = matchedApartment ? matchedApartment.id : null;
+        });
+    });
+};
 
 interface AppState {
     appMode: 'edit' | 'view';
+    dragBuildingsEnabled: boolean;
     currentProjectId: string | null;
     buildings: Building[];
     users: User[];
@@ -17,10 +327,14 @@ interface AppState {
     detailedUnits: DetailedUnit[];
     availableProjectIds: string[];
     currentUser: User | null;
+    accessToken: string | null;
+    refreshToken: string | null;
     isAuthenticated: boolean;
     selectedBuildingId: string | null;
     selectedUnitId: string | null;
     gridSize: number;
+    currentProjectLayoutStatus: 'idle' | 'loading' | 'saving' | 'ready' | 'missing' | 'error';
+    currentProjectLayoutMessage: string;
     visualFilters: {
         status: UnitStatus | null;
         bank: string | null;
@@ -32,286 +346,25 @@ interface AppState {
         saldo: boolean | null;
     };
 }
-// ... (generateUnits function stays the same) ...
-const generateUnits = (buildingId: string, prefix: string, count: number) => {
-    return Array.from({ length: count }, (_, i) => {
-        const status = i < count * 0.4 ? 'delivered' : 
-                     i < count * 0.6 ? 'financing' : 
-                     i < count * 0.75 ? 'inspection' : 
-                     i < count * 0.9 ? 'sold' : 'available';
-        
-        const floor = Math.floor(i / 3) + 1;
-        const banks = ["Apap", "Popular", "BHD", "Alnap", "Banreservas", "Santa Cruz", "Scotiabank", "Cibao", "Banesco"];
-        const bank = banks[Math.floor(Math.random() * banks.length)];
-        
-        return {
-            id: `unt_${prefix.toLowerCase()}_${i}`,
-            detailedUnitId: null,
-            buildingId,
-            name: `${prefix}-${100 + i}`,
-            status: status as UnitStatus,
-            paid: status === 'delivered' || Math.random() > 0.5,
-            balance: (status === 'financing' || Math.random() > 0.7) ? 40000 + (Math.random() * 80000) : 0,
-            bank: bank,
-            floor: floor,
-            hasDebt: status === 'financing' || Math.random() > 0.7,
-            enInspeccion: Math.random() > 0.8,
-            legal: Math.random() > 0.6,
-            titulo: Math.random() > 0.9,
-            descargadaDGII: Math.random() > 0.7,
-            saldo: status === 'delivered' || Math.random() > 0.5
-        };
-    });
-};
 
 export const appStore = reactive<AppState>({
     appMode: 'view',
+    dragBuildingsEnabled: false,
     currentProjectId: null,
-    buildings: [
-        // NT8 High-Density Master Plan (3x3 footprint)
-        { id: 'bld_1', projectId: 'NT8', name: 'Bloque DN-A1', position: { x: -8, z: -25 }, dimensions: { width: 3, depth: 3, height: 12 }, units: generateUnits('bld_1', 'DN-A1', 36) },
-        { id: 'bld_2', projectId: 'NT8', name: 'Bloque DN-A2', position: { x: -8, z: -15 }, dimensions: { width: 3, depth: 3, height: 12 }, units: generateUnits('bld_2', 'DN-A2', 36) },
-        { id: 'bld_3', projectId: 'NT8', name: 'Bloque DN-A3', position: { x: -8, z: -5 }, dimensions: { width: 3, depth: 3, height: 15 }, units: generateUnits('bld_3', 'DN-A3', 45) },
-        { id: 'bld_4', projectId: 'NT8', name: 'Bloque DN-A4', position: { x: -8, z: 5 }, dimensions: { width: 3, depth: 3, height: 15 }, units: generateUnits('bld_4', 'DN-A4', 45) },
-        { id: 'bld_5', projectId: 'NT8', name: 'Bloque DN-A5', position: { x: -8, z: 15 }, dimensions: { width: 3, depth: 3, height: 15 }, units: generateUnits('bld_5', 'DN-A5', 45) },
-        
-        { id: 'bld_6', projectId: 'NT8', name: 'Bloque DO-B1', position: { x: 8, z: -25 }, dimensions: { width: 3, depth: 3, height: 12 }, units: generateUnits('bld_6', 'DO-B1', 36) },
-        { id: 'bld_7', projectId: 'NT8', name: 'Bloque DO-B2', position: { x: 8, z: -15 }, dimensions: { width: 3, depth: 3, height: 12 }, units: generateUnits('bld_7', 'DO-B2', 36) },
-        { id: 'bld_8', projectId: 'NT8', name: 'Bloque DO-B3', position: { x: 8, z: -5 }, dimensions: { width: 3, depth: 3, height: 18 }, units: generateUnits('bld_8', 'DO-B3', 54) },
-        { id: 'bld_9', projectId: 'NT8', name: 'Bloque DO-B4', position: { x: 8, z: 5 }, dimensions: { width: 3, depth: 3, height: 18 }, units: generateUnits('bld_9', 'DO-B4', 54) },
-        { id: 'bld_10', projectId: 'NT8', name: 'Bloque DO-B5', position: { x: 8, z: 15 }, dimensions: { width: 3, depth: 3, height: 18 }, units: generateUnits('bld_10', 'DO-B5', 54) },
-
-        { id: 'bld_11', projectId: 'NT8', name: 'Torre Central A', position: { x: 0, z: -35 }, dimensions: { width: 3, depth: 3, height: 25 }, units: generateUnits('bld_11', 'TC-A', 75) },
-        { id: 'bld_12', projectId: 'NT8', name: 'Torre Central B', position: { x: 0, z: 25 }, dimensions: { width: 3, depth: 3, height: 25 }, units: generateUnits('bld_12', 'TC-B', 75) }
-    ],
-    users: [
-        { id: 'usr_1', name: 'Administrador', email: 'admin@example.com', role: 'admin', password: 'admin123' },
-        { id: 'usr_2', name: 'Editor de Proyectos', email: 'editor@example.com', role: 'editor', password: 'editor123' },
-        { id: 'usr_3', name: 'Visitante', email: 'viewer@example.com', role: 'viewer', password: 'viewer123' },
-    ],
-    projects: [
-        { id: 'NT8', nombre: 'Proyecto NT8', direccion: 'Santo Domingo DN', provincia: 'Distrito Nacional', municipio: 'Santo Domingo Center', imagenPlano: '' },
-    ],
-    availableProjectIds: ['NT8'],
-    detailedUnits: [
-        ...unitData,
-        // PRJ_001 Dummy Detailed Units
-        {
-            id: 999001,
-            codUnidad: 'PRJ_001-PALM-A101',
-            edificio: 'PALM-A',
-            unidad: '101',
-            metraje: 95.5,
-            estado: 'Vendido',
-            nombre: 'Carlos Ramirez',
-            telefono: '809-555-9001',
-            correo: 'carlos@example.com',
-            cedula: '402-0000000-1',
-            precio: 5200000,
-            inicial: 1000000,
-            inicialDolar: 17000,
-            pagado: 1200000,
-            adeudado: 4000000,
-            fechaCompletaInicial: null,
-            fechaInicioVaciados: null,
-            fechaEntregaInspeccion: null,
-            fechaLegal: null,
-            fechaGobierno: null,
-            fechaMicelaneos: null,
-            fechaInspeccion1: null,
-            fechaInspeccion2: null,
-            fechaFormaPago: null,
-            iniciadoVaciados: true,
-            enInspeccion: false,
-            inspeccion1: true,
-            inspeccion2: false,
-            legal: true,
-            gobierno: false,
-            micelaneos: true,
-            titulo: false,
-            responsableLegal: 'Wendy',
-            responsableGobierno: '',
-            responsableMicelaneos: 'Argenis',
-            formaPago: 'Financiado',
-            banco: 'Popular',
-            saldo: false,
-            entregada: false,
-            descargadaDGII: true
-        },
-        {
-            id: 999002,
-            codUnidad: 'PRJ_001-PALM-A102',
-            edificio: 'PALM-A',
-            unidad: '102',
-            metraje: 115,
-            estado: 'Disponible',
-            nombre: '',
-            telefono: '',
-            correo: '',
-            cedula: '',
-            precio: 6500000,
-            inicial: null,
-            inicialDolar: null,
-            pagado: 0,
-            adeudado: 6500000,
-            fechaCompletaInicial: null,
-            fechaInicioVaciados: null,
-            fechaEntregaInspeccion: null,
-            fechaLegal: null,
-            fechaGobierno: null,
-            fechaMicelaneos: null,
-            fechaInspeccion1: null,
-            fechaInspeccion2: null,
-            fechaFormaPago: null,
-            iniciadoVaciados: false,
-            enInspeccion: false,
-            inspeccion1: false,
-            inspeccion2: false,
-            legal: false,
-            gobierno: false,
-            micelaneos: false,
-            titulo: false,
-            responsableLegal: '',
-            responsableGobierno: '',
-            responsableMicelaneos: '',
-            formaPago: '',
-            banco: '',
-            saldo: false,
-            entregada: false,
-            descargadaDGII: false
-        },
-        {
-            id: 999003,
-            codUnidad: 'PRJ_001-PALM-B104',
-            edificio: 'PALM-B',
-            unidad: '104',
-            metraje: 102,
-            estado: 'Vendido',
-            nombre: 'Juan Perez',
-            telefono: '809-555-0001',
-            correo: 'juan@example.com',
-            cedula: '001-0000000-1',
-            precio: 4800000,
-            inicial: 960000,
-            inicialDolar: 16500,
-            pagado: 960000,
-            adeudado: 3840000,
-            fechaCompletaInicial: '2023-10-15',
-            fechaInicioVaciados: '2024-01-20',
-            fechaEntregaInspeccion: '2024-05-10',
-            fechaLegal: '2023-11-05',
-            fechaGobierno: null,
-            fechaMicelaneos: null,
-            fechaInspeccion1: '2024-05-15',
-            fechaInspeccion2: null,
-            fechaFormaPago: '2023-11-20',
-            iniciadoVaciados: true,
-            enInspeccion: true,
-            inspeccion1: true,
-            inspeccion2: false,
-            legal: true,
-            gobierno: false,
-            micelaneos: false,
-            titulo: false,
-            responsableLegal: 'Argenis',
-            responsableGobierno: 'Ivan',
-            responsableMicelaneos: 'Marti',
-            formaPago: 'Financiado',
-            banco: 'Popular',
-            saldo: false,
-            entregada: false,
-            descargadaDGII: false
-        },
-        {
-            id: 999004,
-            codUnidad: 'PRJ_001-PALM-B106',
-            edificio: 'PALM-B',
-            unidad: '106',
-            metraje: 120,
-            estado: 'Vendido',
-            nombre: 'Maria Gomez',
-            telefono: '829-555-0010',
-            correo: 'maria@example.com',
-            cedula: '031-0000000-5',
-            precio: 7200000,
-            inicial: 1440000,
-            inicialDolar: 24800,
-            pagado: 7200000,
-            adeudado: 0,
-            fechaCompletaInicial: '2023-08-10',
-            fechaInicioVaciados: '2023-11-15',
-            fechaEntregaInspeccion: '2024-03-22',
-            fechaLegal: '2023-09-01',
-            fechaGobierno: '2024-04-10',
-            fechaMicelaneos: '2024-05-01',
-            fechaInspeccion1: '2024-03-25',
-            fechaInspeccion2: '2024-04-05',
-            fechaFormaPago: '2023-09-15',
-            iniciadoVaciados: true,
-            enInspeccion: false,
-            inspeccion1: true,
-            inspeccion2: true,
-            legal: true,
-            gobierno: true,
-            micelaneos: true,
-            titulo: true,
-            responsableLegal: 'Minerva',
-            responsableGobierno: 'Wendy',
-            responsableMicelaneos: 'Maureen',
-            formaPago: 'Fondos Propios',
-            banco: '',
-            saldo: true,
-            entregada: true,
-            descargadaDGII: true
-        },
-        {
-            id: 999005,
-            codUnidad: 'PRJ_001-PALM-B107',
-            edificio: 'PALM-B',
-            unidad: '107',
-            metraje: 110,
-            estado: 'Vendido',
-            nombre: 'Beatriz Mendez',
-            telefono: '809-555-7788',
-            correo: 'beatriz@example.com',
-            cedula: '001-0882233-4',
-            precio: 5500000,
-            inicial: 1100000,
-            inicialDolar: 19000,
-            pagado: 2500000,
-            adeudado: 3000000,
-            fechaCompletaInicial: '2023-12-01',
-            fechaInicioVaciados: '2024-03-15',
-            fechaEntregaInspeccion: '2024-06-20',
-            fechaLegal: '2023-12-15',
-            fechaGobierno: null,
-            fechaMicelaneos: null,
-            fechaInspeccion1: null,
-            fechaInspeccion2: null,
-            fechaFormaPago: '2024-01-10',
-            iniciadoVaciados: true,
-            enInspeccion: false,
-            inspeccion1: false,
-            inspeccion2: false,
-            legal: true,
-            gobierno: false,
-            micelaneos: false,
-            titulo: false,
-            responsableLegal: 'Wendy',
-            responsableGobierno: 'Ivan',
-            responsableMicelaneos: 'Marti',
-            formaPago: 'Financiado',
-            banco: 'Reservas',
-            saldo: false,
-            entregada: false,
-            descargadaDGII: false
-        }
-    ],
+    buildings: [],
+    users: [],
+    projects: [],
+    availableProjectIds: [],
+    detailedUnits: [],
     currentUser: null,
+    accessToken: null,
+    refreshToken: null,
     isAuthenticated: false,
     selectedBuildingId: null,
     selectedUnitId: null,
     gridSize: 300,
+    currentProjectLayoutStatus: 'idle',
+    currentProjectLayoutMessage: '',
     visualFilters: {
         status: null,
         bank: null,
@@ -328,12 +381,28 @@ export const selectProject = (id: string | null) => {
     appStore.currentProjectId = id;
     appStore.selectedBuildingId = null;
     appStore.selectedUnitId = null;
+
+    if (id) {
+        clearProjectLayoutState(id);
+        clearProjectApartmentState();
+        appStore.currentProjectLayoutStatus = 'loading';
+        appStore.currentProjectLayoutMessage = '';
+        void loadProjectLayout(id);
+        void loadProjectApartments(id);
+    } else {
+        appStore.currentProjectLayoutStatus = 'idle';
+        appStore.currentProjectLayoutMessage = '';
+    }
 };
 
 export const setAppMode = (mode: 'edit' | 'view') => {
     appStore.appMode = mode;
     appStore.selectedBuildingId = null;
     appStore.selectedUnitId = null;
+};
+
+export const setDragBuildingsEnabled = (enabled: boolean) => {
+    appStore.dragBuildingsEnabled = enabled;
 };
 
 // Simple unique ID generator
@@ -351,6 +420,7 @@ export const addBuilding = (position: { x: number, z: number }) => {
         name: `Edificio ${appStore.buildings.length + 1}`,
         position,
         dimensions: { width: 3, depth: 3, height: 8 }, // 3x3 default
+        rotationY: 0,
         units: []
     };
     
@@ -462,41 +532,130 @@ export const updateBuildingPosition = (id: string, position: { x: number, z: num
 };
 
 // User Management Actions
-export const addUser = (userData: Omit<User, 'id'>) => {
-    const newUser: User = {
-        id: `usr_${generateId()}`,
-        ...userData
-    };
-    appStore.users.push(newUser);
-    return newUser;
+export const addUser = async (userData: Omit<User, 'id'>) => {
+    const payload = { ...userData };
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/Users`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...getAuthHeaders()
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+            let responsePayload: unknown = null;
+            try {
+                responsePayload = await response.json();
+            } catch (_parseError) {
+                responsePayload = null;
+            }
+
+            const createdUser = normalizeUserResponse(responsePayload);
+            if (createdUser) {
+                appStore.users.push(createdUser);
+                return createdUser;
+            }
+
+            await loadUsers();
+            return appStore.users.find(user => user.email === userData.email) ?? null;
+        }
+    } catch (_error) {
+        // Fall back to a local optimistic insert below.
+    }
+
+    return null;
 };
 
-export const updateUser = (id: string, updates: Partial<User>) => {
+export const updateUser = async (id: number, updates: Partial<User> & { oldPassword?: string }): Promise<User | null> => {
     const user = appStore.users.find(u => u.id === id);
+    const nextUser = user ? { ...user, ...updates, id } : null;
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/Users/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                ...getAuthHeaders()
+            },
+            body: JSON.stringify({
+                ...(user ?? { id }),
+                ...updates,
+                id
+            })
+        });
+
+        if (response.ok) {
+            let responsePayload: unknown = null;
+            try {
+                responsePayload = await response.json();
+            } catch (_parseError) {
+                responsePayload = null;
+            }
+
+            const updatedUser = normalizeUserResponse(responsePayload) ?? nextUser;
+            if (updatedUser) {
+                const index = appStore.users.findIndex(u => u.id === id);
+                if (index > -1) {
+                    appStore.users[index] = updatedUser;
+                } else {
+                    appStore.users.push(updatedUser);
+                }
+            }
+            return updatedUser;
+        }
+    } catch (_error) {
+        // Fall back to local optimistic update below.
+    }
+
     if (user) {
         Object.assign(user, updates);
+        return user;
     }
+
+    return nextUser;
 };
 
-export const updateProfile = (updates: Partial<User>) => {
-    if (!appStore.currentUser) return;
+export const updateProfile = async (updates: Partial<User> & { oldPassword?: string }): Promise<User | null> => {
+    if (!appStore.currentUser) return null;
     
     const userId = appStore.currentUser.id;
-    
-    // Update current session user
-    Object.assign(appStore.currentUser, updates);
-    
-    // Update in users list
-    const user = appStore.users.find(u => u.id === userId);
-    if (user) {
-        Object.assign(user, updates);
-    }
-    
-    // Update localStorage
-    localStorage.setItem('auth_user', JSON.stringify(appStore.currentUser));
+
+    const updatedUser = await updateUser(userId, updates);
+    if (!updatedUser) return null;
+
+    appStore.currentUser = updatedUser;
+    persistAuthSession({
+        user: updatedUser,
+        accessToken: appStore.accessToken,
+        refreshToken: appStore.refreshToken
+    });
+
+    return updatedUser;
 };
 
-export const deleteUser = (id: string) => {
+export const deleteUser = async (id: number) => {
+    try {
+        const response = await fetch(`${API_BASE_URL}/Users/${id}`, {
+            method: 'DELETE',
+            headers: {
+                ...getAuthHeaders()
+            }
+        });
+
+        if (response.ok) {
+            const index = appStore.users.findIndex(u => u.id === id);
+            if (index > -1) {
+                appStore.users.splice(index, 1);
+            }
+            return;
+        }
+    } catch (_error) {
+        // Fall back to local removal below.
+    }
+
     const index = appStore.users.findIndex(u => u.id === id);
     if (index > -1) {
         appStore.users.splice(index, 1);
@@ -505,38 +664,100 @@ export const deleteUser = (id: string) => {
 
 // Auth Actions
 export const login = async (email: string, password?: string) => {
-    // For this simulation, we'll just check if the user exists in our dummy list
-    const user = appStore.users.find(u => 
-        u.email.toLowerCase() === email.toLowerCase() && 
-        u.password === password
-    );
-    
-    if (user) {
-        appStore.currentUser = user;
-        appStore.isAuthenticated = true;
-        localStorage.setItem('auth_user', JSON.stringify(user));
-        return true;
+    const response = await fetch(`${API_BASE_URL}/Auth/login`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ email, password })
+    });
+
+    if (!response.ok) {
+        return false;
     }
-    return false;
+
+    const data = (await response.json()) as Partial<AuthResponse>;
+    const normalizedUser = normalizeUserResponse(data.user);
+    if (!normalizedUser) {
+        return false;
+    }
+
+    appStore.currentUser = normalizedUser;
+    appStore.accessToken = data.accessToken ?? null;
+    appStore.refreshToken = data.refreshToken ?? null;
+    appStore.isAuthenticated = true;
+
+    persistAuthSession({
+        user: normalizedUser,
+        accessToken: data.accessToken ?? null,
+        refreshToken: data.refreshToken ?? null
+    });
+
+    void loadProjects();
+    void loadAvailableProjectIds();
+    void loadUsers();
+
+    return true;
 };
 
 export const logout = () => {
     appStore.currentUser = null;
+    appStore.accessToken = null;
+    appStore.refreshToken = null;
     appStore.isAuthenticated = false;
-    localStorage.removeItem('auth_user');
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+};
+
+export const ensureAuthInitialized = async () => {
+    if (authInitializationPromise) {
+        return authInitializationPromise;
+    }
+
+    authInitializationPromise = (async () => {
+        const session = readAuthSession();
+        if (!session) {
+            return;
+        }
+
+        applyAuthSession(session);
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/Auth/me`, {
+                method: 'GET',
+                headers: {
+                    ...(session.accessToken ? { Authorization: `Bearer ${session.accessToken}` } : {})
+                }
+            });
+
+            if (!response.ok) return;
+
+            const refreshedUser = normalizeUserResponse(await response.json());
+            if (!refreshedUser) return;
+
+            const refreshedSession: AuthSession = {
+                user: refreshedUser,
+                accessToken: session.accessToken,
+                refreshToken: session.refreshToken
+            };
+
+            applyAuthSession(refreshedSession);
+            persistAuthSession(refreshedSession);
+        } catch (_error) {
+            // Keep the cached session if the refresh call fails.
+        }
+
+        await Promise.all([
+            loadProjects(),
+            loadAvailableProjectIds(),
+            loadUsers()
+        ]);
+    })();
+
+    return authInitializationPromise;
 };
 
 export const checkAuth = () => {
-    const savedUser = localStorage.getItem('auth_user');
-    if (savedUser) {
-        try {
-            const user = JSON.parse(savedUser);
-            appStore.currentUser = user;
-            appStore.isAuthenticated = true;
-        } catch (e) {
-            localStorage.removeItem('auth_user');
-        }
-    }
+    void ensureAuthInitialized();
 };
 
 // Auth Getters
@@ -549,21 +770,314 @@ export const canManageUsers = () => isAdmin();
 export const canEditData = () => isEditor();
 export const canDeleteData = () => isAdmin();
 
-// Project Management Actions
-export const addProject = (project: Project) => {
-    appStore.projects.push(project);
+export const loadUsers = async () => {
+    if (usersLoadPromise) {
+        return usersLoadPromise;
+    }
+
+    usersLoadPromise = (async () => {
+    try {
+        const response = await fetch(`${API_BASE_URL}/Users`, {
+            headers: {
+                ...getAuthHeaders()
+            }
+        });
+
+        if (!response.ok) {
+            return appStore.users;
+        }
+
+        const payload = await response.json();
+        const users = normalizeUsersResponse(payload);
+        if (users.length > 0) {
+            appStore.users = users;
+        }
+        return appStore.users;
+    } catch (_error) {
+        return appStore.users;
+    } finally {
+        usersLoadPromise = null;
+    }
+    })();
+
+    return usersLoadPromise;
 };
 
-export const updateProject = (id: string, updates: Partial<Project>) => {
-    const project = appStore.projects.find(p => p.id === id);
-    if (project) {
-        Object.assign(project, updates);
+// Project Management Actions
+export const loadProjects = async () => {
+    if (projectsLoadPromise) {
+        return projectsLoadPromise;
+    }
+
+    projectsLoadPromise = (async () => {
+    try {
+        const response = await fetch(`${API_BASE_URL}/Projects`, {
+            headers: {
+                ...getAuthHeaders()
+            }
+        });
+
+        if (!response.ok) {
+            return appStore.projects;
+        }
+
+        const payload = await response.json();
+        const projects = normalizeProjectsResponse(payload);
+        syncProjectsState(projects);
+        return projects;
+    } catch (_error) {
+        return appStore.projects;
+    } finally {
+        projectsLoadPromise = null;
+    }
+    })();
+
+    return projectsLoadPromise;
+};
+
+export const loadProjectLayout = async (projectId: string) => {
+    try {
+        const response = await fetch(`${API_BASE_URL}/Projects/${projectId}/layout`, {
+            headers: {
+                ...getAuthHeaders()
+            }
+        });
+
+        if (!response.ok) {
+            let message = '';
+            try {
+                const payload = await response.json();
+                message = typeof payload?.message === 'string' ? payload.message : '';
+            } catch (_parseError) {
+                // Ignore malformed error payloads.
+            }
+
+            if (message.toLowerCase().includes('does not have a layout configured')) {
+                if (appStore.currentProjectId === projectId) {
+                    appStore.currentProjectLayoutStatus = 'missing';
+                    appStore.currentProjectLayoutMessage = 'Este proyecto aun no tiene un layout configurado. Puedes comenzar a crearlo desde el editor.';
+                }
+                return null;
+            }
+
+            if (appStore.currentProjectId === projectId) {
+                appStore.currentProjectLayoutStatus = 'error';
+                appStore.currentProjectLayoutMessage = 'No se pudo cargar el layout del proyecto.';
+            }
+            return null;
+        }
+
+        const payload = await response.json();
+        const layout = normalizeLayoutResponse(payload);
+
+        if (appStore.currentProjectId !== projectId) {
+            return layout;
+        }
+
+        syncProjectLayoutState(projectId, layout.buildings, layout.gridSize);
+        linkProjectApartmentsToLayout(projectId);
+        appStore.currentProjectLayoutStatus = 'ready';
+        appStore.currentProjectLayoutMessage = '';
+        return layout;
+    } catch (_error) {
+        if (appStore.currentProjectId === projectId) {
+            appStore.currentProjectLayoutStatus = 'error';
+            appStore.currentProjectLayoutMessage = 'No se pudo cargar el layout del proyecto.';
+        }
+        return null;
     }
 };
 
-export const deleteProject = (id: string) => {
+export const loadProjectApartments = async (projectId: string) => {
+    try {
+        const response = await fetch(`${API_BASE_URL}/Projects/${projectId}/apartments`, {
+            headers: {
+                ...getAuthHeaders()
+            }
+        });
+
+        if (!response.ok) {
+            return appStore.detailedUnits;
+        }
+
+        const payload = await response.json();
+        const apartments = normalizeDetailedUnitsResponse(payload);
+
+        if (appStore.currentProjectId !== projectId) {
+            return apartments;
+        }
+
+        appStore.detailedUnits = apartments;
+        linkProjectApartmentsToLayout(projectId);
+        return apartments;
+    } catch (_error) {
+        return appStore.detailedUnits;
+    }
+};
+
+export const saveProjectLayout = async () => {
+    const projectId = appStore.currentProjectId;
+    if (!projectId) {
+        return null;
+    }
+
+    const projectBuildings = appStore.buildings.filter(building => building.projectId === projectId);
+    appStore.currentProjectLayoutStatus = 'saving';
+    appStore.currentProjectLayoutMessage = '';
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/Projects/${projectId}/layout`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                ...getAuthHeaders()
+            },
+            body: JSON.stringify({
+                projectId,
+                gridSize: appStore.gridSize,
+                buildings: projectBuildings
+            })
+        });
+
+        if (!response.ok) {
+            let message = '';
+            try {
+                const payload = await response.json();
+                message = typeof payload?.message === 'string' ? payload.message : '';
+            } catch (_parseError) {
+                // Ignore malformed error payloads.
+            }
+
+            appStore.currentProjectLayoutStatus = 'error';
+            appStore.currentProjectLayoutMessage = message || 'No se pudo guardar el layout del proyecto.';
+            return null;
+        }
+
+        const payload = await response.json();
+        const layout = normalizeLayoutResponse(payload);
+        syncProjectLayoutState(projectId, layout.buildings.length > 0 ? layout.buildings : projectBuildings, layout.gridSize ?? appStore.gridSize);
+        appStore.currentProjectLayoutStatus = 'ready';
+        appStore.currentProjectLayoutMessage = 'Layout guardado correctamente.';
+        return layout;
+    } catch (_error) {
+        appStore.currentProjectLayoutStatus = 'error';
+        appStore.currentProjectLayoutMessage = 'No se pudo guardar el layout del proyecto.';
+        return null;
+    }
+};
+
+export const loadAvailableProjectIds = async () => {
+    if (availableProjectIdsLoadPromise) {
+        return availableProjectIdsLoadPromise;
+    }
+
+    availableProjectIdsLoadPromise = (async () => {
+    try {
+        const response = await fetch(`${API_BASE_URL}/Apartamentos/sheets`, {
+            headers: {
+                ...getAuthHeaders()
+            }
+        });
+
+        if (!response.ok) {
+            return appStore.availableProjectIds;
+        }
+
+        const payload = await response.json();
+        const ids = normalizeStringListResponse(payload);
+
+        if (ids.length > 0) {
+            appStore.availableProjectIds = ids;
+        }
+
+        return appStore.availableProjectIds;
+    } catch (_error) {
+        return appStore.availableProjectIds;
+    } finally {
+        availableProjectIdsLoadPromise = null;
+    }
+    })();
+
+    return availableProjectIdsLoadPromise;
+};
+
+export const addProject = async (project: Project) => {
+    try {
+        const response = await fetch(`${API_BASE_URL}/Projects`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...getAuthHeaders()
+            },
+            body: JSON.stringify(project)
+        });
+
+        if (response.ok) {
+            const createdProject = normalizeProjectResponse(await response.json()) ?? project;
+            appStore.projects.push(createdProject);
+            appStore.availableProjectIds = appStore.projects.map(item => item.id);
+            return createdProject;
+        }
+    } catch (_error) {
+        // Fall back to optimistic local update below.
+    }
+
+    appStore.projects.push(project);
+    appStore.availableProjectIds = appStore.projects.map(item => item.id);
+    return project;
+};
+
+export const updateProject = async (id: string, updates: Partial<Project>) => {
+    const project = appStore.projects.find(p => p.id === id);
+    if (!project) return null;
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/Projects/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                ...getAuthHeaders()
+            },
+            body: JSON.stringify({ ...project, ...updates })
+        });
+
+        if (response.ok) {
+            const updatedProject = normalizeProjectResponse(await response.json()) ?? { ...project, ...updates };
+            Object.assign(project, updatedProject);
+            return updatedProject;
+        }
+    } catch (_error) {
+        // Fall back to optimistic local update below.
+    }
+
+    Object.assign(project, updates);
+    return project;
+};
+
+export const deleteProject = async (id: string) => {
+    try {
+        const response = await fetch(`${API_BASE_URL}/Projects/${id}`, {
+            method: 'DELETE',
+            headers: {
+                ...getAuthHeaders()
+            }
+        });
+
+        if (response.ok) {
+            const index = appStore.projects.findIndex(p => p.id === id);
+            if (index > -1) {
+                appStore.projects.splice(index, 1);
+                appStore.availableProjectIds = appStore.projects.map(item => item.id);
+            }
+            return;
+        }
+    } catch (_error) {
+        // Fall back to local removal below.
+    }
+
     const index = appStore.projects.findIndex(p => p.id === id);
     if (index > -1) {
         appStore.projects.splice(index, 1);
+        appStore.availableProjectIds = appStore.projects.map(item => item.id);
     }
 };

@@ -465,7 +465,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { appStore } from '../store/appStore';
+import { appStore, selectProject } from '../store/appStore';
 import type { DetailedUnit } from '../models/types';
 
 const route = useRoute();
@@ -614,8 +614,17 @@ const viewDetails = (unit: DetailedUnit) => {
 };
 
 onMounted(() => {
+  if (projectId) {
+    selectProject(projectId);
+  }
   // We could fetch units here if we had an API
   window.scrollTo(0, 0);
+});
+
+watch(() => route.params.id, (newId) => {
+  if (typeof newId === 'string' && newId) {
+    selectProject(newId);
+  }
 });
 </script>
 

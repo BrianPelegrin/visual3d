@@ -178,6 +178,11 @@
     <div v-if="showModal" class="modal-overlay d-flex align-items-center justify-content-center">
       <div class="modal-content-custom bg-white rounded-4 shadow-lg p-4 animate__animated animate__fadeInDown">
         <h4 class="fw-bold text-slate-900 mb-4">{{ isEditing ? 'Editar Proyecto' : 'Nuevo Proyecto' }}</h4>
+
+        <div v-if="formMessage" class="form-banner mb-4" :class="formMessageType === 'danger' ? 'form-banner-danger' : 'form-banner-warning'">
+          <i class="bi me-2" :class="formMessageType === 'danger' ? 'bi-exclamation-triangle-fill' : 'bi-exclamation-circle-fill'"></i>
+          <span>{{ formMessage }}</span>
+        </div>
         
         <form @submit.prevent="saveProject">
           <div class="mb-4">
@@ -367,6 +372,8 @@ const showModal = ref(false);
 const isEditing = ref(false);
 const showDeleteConfirm = ref(false);
 const projectToDelete = ref<Project | null>(null);
+const formMessage = ref('');
+const formMessageType = ref<'danger' | 'warning'>('danger');
 
 const form = reactive({
   id: '',
@@ -385,6 +392,7 @@ const openAddModal = () => {
   form.provincia = '';
   form.municipio = '';
   form.imagenPlano = '';
+  formMessage.value = '';
   showModal.value = true;
 };
 
@@ -392,7 +400,8 @@ const handleImageUpload = (event: Event) => {
   const file = (event.target as HTMLInputElement).files?.[0];
   if (file) {
     if (file.size > 2 * 1024 * 1024) { // 2MB limit for base64 strings in this demo
-      alert('La imagen es demasiado grande. El límite es 2MB.');
+      formMessageType.value = 'warning';
+      formMessage.value = 'La imagen es demasiado grande. El límite es 2MB.';
       return;
     }
     
@@ -417,20 +426,28 @@ const openEditModal = (prj: Project) => {
 
 const closeModal = () => {
   showModal.value = false;
+  formMessage.value = '';
 };
 
-const saveProject = () => {
-  if (isEditing.value) {
-    updateProject(form.id, { ...form });
-  } else {
-    // Check if ID already exists
-    if (appStore.projects.some(p => p.id === form.id)) {
-      alert('Este ID de proyecto ya existe.');
-      return;
+const saveProject = async () => {
+  try {
+    if (isEditing.value) {
+      await updateProject(form.id, { ...form });
+    } else {
+      // Check if ID already exists
+      if (appStore.projects.some(p => p.id === form.id)) {
+        formMessageType.value = 'danger';
+        formMessage.value = 'Ese ID ya existe. Prueba con otro identificador.';
+        return;
+      }
+      await addProject({ ...form });
     }
-    addProject({ ...form });
+    formMessage.value = '';
+    closeModal();
+  } catch (_error) {
+    formMessageType.value = 'danger';
+    formMessage.value = 'No se pudo guardar el proyecto. Intenta nuevamente.';
   }
-  closeModal();
 };
 
 const confirmDelete = (prj: Project) => {
@@ -438,9 +455,9 @@ const confirmDelete = (prj: Project) => {
   showDeleteConfirm.value = true;
 };
 
-const doDelete = () => {
+const doDelete = async () => {
   if (projectToDelete.value) {
-    deleteProject(projectToDelete.value.id);
+    await deleteProject(projectToDelete.value.id);
   }
   showDeleteConfirm.value = false;
   projectToDelete.value = null;
@@ -449,6 +466,7 @@ const doDelete = () => {
 const enterEditMode = (id: string) => {
   router.push(`/editor/${id}`);
 };
+
 </script>
 
 <style scoped>
@@ -596,6 +614,29 @@ const enterEditMode = (id: string) => {
 .modal-content-custom {
   width: 100%;
   max-width: 550px;
+}
+
+.form-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.form-banner-danger {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.form-banner-warning {
+  background: #fffbeb;
+  color: #b45309;
+  border-color: #fde68a;
 }
 
 /* Form */

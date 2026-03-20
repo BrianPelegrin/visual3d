@@ -1,4 +1,4 @@
-// src/scene/SceneManager.ts
+﻿// src/scene/SceneManager.ts
 //@ts-ignore
 import * as THREE from 'three';
 //@ts-ignore
@@ -15,6 +15,7 @@ export class SceneManager {
     public labelRenderer: CSS2DRenderer;
     public controls: OrbitControls;
     public appMode: 'edit' | 'view' = 'edit';
+    public dragBuildingsEnabled: boolean = false;
 
     private container: HTMLElement;
     private animationId: number | null = null;
@@ -182,7 +183,7 @@ export class SceneManager {
         });
     }
 
-    public syncBuildings(buildings: any[], visualFilters: any = null) {
+    public syncBuildings(buildings: any[], visualFilters: any = null, selectedUnitId: string | null = null) {
         let buildingsGroup = this.scene.getObjectByName('buildingsGroup') as THREE.Group;
         if (!buildingsGroup) {
             buildingsGroup = new THREE.Group();
@@ -258,12 +259,31 @@ export class SceneManager {
                 group.add(label);
             }
 
+            group.rotation.y = THREE.MathUtils.degToRad(bld.rotationY ?? 0);
+
             // Sync Meshes (recreate units for simplicity but avoid clearing labels)
             const meshesToRemove = group.children.filter(c => !(c as any).isCSS2DObject);
             meshesToRemove.forEach(m => {
                 if ((m as THREE.Mesh).geometry) (m as THREE.Mesh).geometry.dispose();
                 group.remove(m);
             });
+
+            // Re-add pick surfaces, footprint and units
+            const buildingPickGeo = new THREE.BoxGeometry(
+                bld.dimensions.width * 1.04,
+                Math.max(stackHeight + baseHeight + roofHeight, 1),
+                bld.dimensions.depth * 1.04
+            );
+            const buildingPickMat = new THREE.MeshBasicMaterial({
+                color: 0x000000,
+                transparent: true,
+                opacity: 0,
+                depthWrite: false
+            });
+            const buildingPick = new THREE.Mesh(buildingPickGeo, buildingPickMat);
+            buildingPick.position.set(0, 0, 0);
+            buildingPick.userData = { id: bld.id, buildingId: bld.id, isBuildingPick: true };
+            group.add(buildingPick);
 
             // Re-add footprint and units
             const footprintGeo = new THREE.PlaneGeometry(bld.dimensions.width, bld.dimensions.depth);
@@ -277,7 +297,7 @@ export class SceneManager {
             const footprint = new THREE.Mesh(footprintGeo, footprintMat);
             footprint.rotation.x = -Math.PI / 2;
             footprint.position.y = startY;
-            footprint.userData = { id: bld.id, isBuilding: true };
+            footprint.userData = { id: bld.id, buildingId: bld.id, isBuildingVisual: true };
             group.add(footprint);
 
             const uW = bld.dimensions.width * 0.95;
@@ -285,6 +305,7 @@ export class SceneManager {
 
             bld.units.forEach((unit: any, index: number) => {
                 const colorHex = globalRulesEngine.resolveColor(unit);
+                const isSelectedUnit = selectedUnitId !== null && unit.id === selectedUnitId;
                 
                 // Multi-criteria filter check
                 let isHighlighted = true;
@@ -301,32 +322,44 @@ export class SceneManager {
                 
                 // 1. Unit Body
                 const uMat = new THREE.MeshStandardMaterial({ 
-                    color: colorHex,
+                    color: isSelectedUnit ? 0xf59e0b : colorHex,
                     roughness: 0.3,
                     metalness: 0.2,
-                    emissive: new THREE.Color(colorHex),
-                    emissiveIntensity: isHighlighted ? 0.1 : 0,
+                    emissive: new THREE.Color(isSelectedUnit ? 0xfbbf24 : colorHex),
+                    emissiveIntensity: isSelectedUnit ? 0.55 : (isHighlighted ? 0.1 : 0),
                     transparent: !isHighlighted,
-                    opacity: isHighlighted ? 1 : 0.15
+                    opacity: isSelectedUnit ? 1 : (isHighlighted ? 1 : 0.15)
                 });
                 const uMesh = new THREE.Mesh(unitGeometry, uMat);
                 uMesh.scale.set(uW, unitHeight, uD);
                 const posY = startY + (index * (unitHeight + padding)) + (unitHeight / 2) + padding;
                 uMesh.position.set(0, posY, 0);
-                uMesh.userData = { id: unit.id, buildingId: bld.id, isUnit: true };
+                uMesh.userData = { id: unit.id, buildingId: bld.id, isUnitVisual: true };
                 group.add(uMesh);
+
+                const unitPickGeo = new THREE.BoxGeometry(uW * 1.1, unitHeight * 1.5, uD * 1.1);
+                const unitPickMat = new THREE.MeshBasicMaterial({
+                    color: 0x000000,
+                    transparent: true,
+                    opacity: 0,
+                    depthWrite: false
+                });
+                const unitPick = new THREE.Mesh(unitPickGeo, unitPickMat);
+                unitPick.position.copy(uMesh.position);
+                unitPick.userData = { id: unit.id, buildingId: bld.id, isUnitPick: true };
+                group.add(unitPick);
 
                 // 2. Unit Edges (Highlight)
                 const edgesGeo = new THREE.EdgesGeometry(unitGeometry);
                 const edgesMat = new THREE.LineBasicMaterial({ 
-                    color: 0xffffff, 
+                    color: isSelectedUnit ? 0xf59e0b : 0xffffff, 
                     transparent: true, 
-                    opacity: isHighlighted ? 0.3 : 0.05 
+                    opacity: isSelectedUnit ? 1 : (isHighlighted ? 0.3 : 0.05)
                 });
                 const edgesLine = new THREE.LineSegments(edgesGeo, edgesMat);
                 edgesLine.scale.set(uW, unitHeight, uD);
                 edgesLine.position.copy(uMesh.position);
-                edgesLine.userData = { id: unit.id, buildingId: bld.id, isUnit: true };
+                edgesLine.userData = { id: unit.id, buildingId: bld.id, isUnitVisual: true };
                 group.add(edgesLine);
             });
 
@@ -349,9 +382,9 @@ export class SceneManager {
 
             // 5. Add Balconies (Architectural depth)
             const balconyGeo = new THREE.BoxGeometry(bld.dimensions.width * 0.15, 0.05, bld.dimensions.depth * 0.04);
-            const balconyMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.2 });
-            
+
             bld.units.forEach((unit: any, index: number) => {
+                const isSelectedUnit = selectedUnitId !== null && unit.id === selectedUnitId;
                 // Determine highlight based on ALL criteria
                 let isHighlighted = true;
                 if (visualFilters) {
@@ -368,15 +401,15 @@ export class SceneManager {
                 const posY = startY + (index * (unitHeight + padding)) + (unitHeight / 2) + padding;
                 // Add two balconies per unit on the front face
                 for (let xOffset of [-bld.dimensions.width * 0.25, bld.dimensions.width * 0.25]) {
-                    const balcony = new THREE.Mesh(balconyGeo, balconyMat);
+                    const balconyMaterial = new THREE.MeshStandardMaterial({
+                        color: isSelectedUnit ? 0xf59e0b : 0xffffff,
+                        roughness: 0.2,
+                        transparent: isSelectedUnit ? false : !isHighlighted,
+                        opacity: isSelectedUnit ? 1 : (isHighlighted ? 1 : 0.15)
+                    });
+                    const balcony = new THREE.Mesh(balconyGeo, balconyMaterial);
                     balcony.position.set(xOffset, posY, bld.dimensions.depth * 0.49);
-                    balcony.userData = { id: unit.id, buildingId: bld.id, isUnit: true };
-                    
-                    // Apply opacity to balcony as well
-                    if (!isHighlighted) {
-                        (balcony.material as THREE.Material).transparent = true;
-                        (balcony.material as THREE.Material).opacity = 0.15;
-                    }
+                    balcony.userData = { id: unit.id, buildingId: bld.id, isUnitVisual: true };
                     
                     group.add(balcony);
                 }
@@ -389,6 +422,10 @@ export class SceneManager {
     private isDragging = false;
     private draggedGroup: THREE.Group | null = null;
     private dragOffset = new THREE.Vector3();
+    private pointerDownPos: { x: number; y: number } | null = null;
+    private pendingDragGroup: THREE.Group | null = null;
+    private dragThresholdPx = 4;
+    private dragSnapStep = 0.1;
 
     private setupRaycaster() {
         const raycaster = new THREE.Raycaster();
@@ -404,48 +441,55 @@ export class SceneManager {
         this.renderer.domElement.addEventListener('pointerdown', (event: MouseEvent) => {
             getPointerNDC(event);
             raycaster.setFromCamera(pointer, this.camera);
+            this.pointerDownPos = { x: event.clientX, y: event.clientY };
+            this.pendingDragGroup = null;
 
             const buildingsGroup = this.scene.getObjectByName('buildingsGroup');
             if (!buildingsGroup) return;
 
             const intersects = raycaster.intersectObjects(buildingsGroup.children, true);
+            const unitHit = intersects.find(hit => hit.object.userData.isUnitPick);
+            const buildingHit = intersects.find(hit => hit.object.userData.isBuildingPick);
 
-            if (intersects.length > 0) {
-                const hit = intersects[0].object as THREE.Mesh;
+            if (unitHit || buildingHit) {
+                const hit = (unitHit || buildingHit)!.object as THREE.Mesh;
 
                 // In 'edit' mode, start drag if we clicked any part of a building
                 if (this.appMode === 'edit') {
-                    // Find the parent Group (building group)
-                    let parentGroup: THREE.Group | null = null;
-                    let buildingId: string | null = null;
-
-                    if (hit.userData.isBuilding) {
-                        parentGroup = hit.parent as THREE.Group;
-                        buildingId = hit.userData.id;
-                    } else if (hit.userData.isUnit) {
-                        parentGroup = hit.parent as THREE.Group;
-                        buildingId = hit.userData.buildingId;
+                    if (!this.dragBuildingsEnabled && hit.userData.isUnitPick) {
+                        if (this.onObjectSelected) {
+                            this.onObjectSelected(hit.userData.id, true);
+                        }
+                        return;
                     }
 
-                    if (parentGroup) {
-                        this.draggedGroup = parentGroup;
-                        this.isDragging = false;
-                        this.controls.enabled = false;
-                        raycaster.ray.intersectPlane(this.floorPlane, floorIntersect);
-                        this.dragOffset.copy(floorIntersect).sub(new THREE.Vector3(parentGroup.position.x, 0, parentGroup.position.z));
-
-                        if (this.onObjectSelected && buildingId) {
-                            this.onObjectSelected(buildingId, false);
+                    const buildingGroup = this.findBuildingGroup(hit);
+                    if (buildingGroup) {
+                        if (this.dragBuildingsEnabled) {
+                            this.pendingDragGroup = buildingGroup;
+                            this.draggedGroup = buildingGroup;
+                            this.controls.enabled = false;
+                        }
+                        if (this.onObjectSelected) {
+                            if (this.dragBuildingsEnabled) {
+                                const buildingId = buildingGroup.userData?.id || hit.userData.id || null;
+                                this.onObjectSelected(buildingId, false);
+                            } else if (hit.userData.isUnitPick) {
+                                this.onObjectSelected(hit.userData.id, true);
+                            } else {
+                                const buildingId = buildingGroup.userData?.id || hit.userData.id || null;
+                                this.onObjectSelected(buildingId, false);
+                            }
                         }
                     }
                     return;
                 }
 
-                // View Mode — selection only
+                // View Mode â€” selection only
                 if (this.onObjectSelected) {
-                    if (hit.userData.isUnit) {
+                    if (hit.userData.isUnitPick) {
                         this.onObjectSelected(hit.userData.id, true);
-                    } else if (hit.userData.isBuilding) {
+                    } else if (hit.userData.isBuildingPick) {
                         this.onObjectSelected(hit.userData.id, false);
                     }
                 }
@@ -457,30 +501,67 @@ export class SceneManager {
         });
 
         this.renderer.domElement.addEventListener('pointermove', (event: MouseEvent) => {
-            if (!this.draggedGroup) return;
+            if (!this.dragBuildingsEnabled || (!this.pendingDragGroup && !this.draggedGroup)) return;
 
             getPointerNDC(event);
             raycaster.setFromCamera(pointer, this.camera);
 
+            if (this.pendingDragGroup && !this.isDragging && this.pointerDownPos) {
+                const dx = event.clientX - this.pointerDownPos.x;
+                const dy = event.clientY - this.pointerDownPos.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance >= this.dragThresholdPx) {
+                    this.draggedGroup = this.pendingDragGroup;
+                    this.pendingDragGroup = null;
+                    this.isDragging = false;
+                    this.controls.enabled = false;
+                    raycaster.ray.intersectPlane(this.floorPlane, floorIntersect);
+                    this.dragOffset.copy(floorIntersect).sub(new THREE.Vector3(this.draggedGroup.position.x, 0, this.draggedGroup.position.z));
+
+                    const buildingId = this.draggedGroup.userData?.id || this.draggedGroup.children.find(c => c.userData.isBuildingPick)?.userData.id;
+                    if (this.onObjectSelected && buildingId) {
+                        this.onObjectSelected(buildingId, false);
+                    }
+                }
+            }
+
             if (raycaster.ray.intersectPlane(this.floorPlane, floorIntersect)) {
                 const newX = floorIntersect.x - this.dragOffset.x;
                 const newZ = floorIntersect.z - this.dragOffset.z;
-                this.draggedGroup.position.x = newX;
-                this.draggedGroup.position.z = newZ;
-                this.isDragging = true;
+                if (this.draggedGroup) {
+                    const snappedX = Math.round(newX / this.dragSnapStep) * this.dragSnapStep;
+                    const snappedZ = Math.round(newZ / this.dragSnapStep) * this.dragSnapStep;
+                    this.draggedGroup.position.x = snappedX;
+                    this.draggedGroup.position.z = snappedZ;
+                    this.isDragging = true;
 
-                const id = this.draggedGroup.children.find(c => c.userData.isBuilding)?.userData.id;
-                if (id && this.onBuildingMoved) {
-                    this.onBuildingMoved(id, newX, newZ);
+                    const id = this.draggedGroup.userData?.id || this.draggedGroup.children.find(c => c.userData.isBuildingPick)?.userData.id;
+                    if (id && this.onBuildingMoved) {
+                        this.onBuildingMoved(id, snappedX, snappedZ);
+                    }
                 }
             }
         });
 
         this.renderer.domElement.addEventListener('pointerup', () => {
             this.draggedGroup = null;
+            this.pendingDragGroup = null;
+            this.pointerDownPos = null;
             this.controls.enabled = true;
             setTimeout(() => { this.isDragging = false; }, 50);
         });
+    }
+
+    private findBuildingGroup(object: THREE.Object3D): THREE.Group | null {
+        let current: THREE.Object3D | null = object;
+        while (current) {
+            if ((current as THREE.Group).isGroup && current.userData?.isBuilding) {
+                return current as THREE.Group;
+            }
+            current = current.parent;
+        }
+        return null;
     }
 
     public updateDragControlsState() {
@@ -502,3 +583,4 @@ export class SceneManager {
         this.renderer.dispose();
     }
 }
+

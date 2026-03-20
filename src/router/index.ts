@@ -5,7 +5,7 @@ import UserManagementView from '../views/UserManagementView.vue';
 import ProjectManagementView from '../views/ProjectManagementView.vue';
 import ProjectUnitsView from '../views/ProjectUnitsView.vue';
 import LoginView from '../views/LoginView.vue';
-import { appStore, checkAuth } from '../store/appStore';
+import { appStore, ensureAuthInitialized } from '../store/appStore';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -48,10 +48,9 @@ const router = createRouter({
   ]
 });
 
-// Check for existing session
-checkAuth();
+router.beforeEach(async (to, _from, next) => {
+  await ensureAuthInitialized();
 
-router.beforeEach((to, _from, next) => {
   if (to.name !== 'login' && !appStore.isAuthenticated) {
     next({ name: 'login' });
   } else if (to.name === 'login' && appStore.isAuthenticated) {

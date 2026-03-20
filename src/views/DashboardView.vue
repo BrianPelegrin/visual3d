@@ -48,6 +48,10 @@
         <div class="col-xl-9">
           <div class="card border-0 shadow-sm rounded-4 overflow-hidden main-3d-card">
             <div class="viewport-wrapper bg-slate-50">
+              <div v-if="layoutNotice" class="layout-notice">
+                <i class="bi bi-info-circle-fill me-2"></i>
+                <span>{{ layoutNotice }}</span>
+              </div>
               <Viewport3D hideUI />
               <div class="viewport-legend position-absolute bottom-0 start-50 translate-middle-x pb-3 d-flex gap-3">
                  <div class="legend-item"><span class="dot bg-success"></span> Entregada</div>
@@ -189,6 +193,12 @@ import Viewport3D from '../components/Viewport3D.vue';
 const route = useRoute();
 const projectId = computed(() => route.params.id as string);
 const project = computed(() => appStore.projects.find(p => p.id === projectId.value));
+const layoutNotice = computed(() => {
+  if (appStore.currentProjectLayoutStatus === 'missing') {
+    return appStore.currentProjectLayoutMessage;
+  }
+  return '';
+});
 
 onMounted(() => {
   setAppMode('view');
@@ -207,34 +217,38 @@ watch(projectId, (newId) => {
 const buildingsCount = computed(() => projectBuildings.value.length);
 const projectBuildings = computed(() => appStore.buildings.filter(b => b.projectId === projectId.value));
 
-// Enriched units with real data from detailedUnits
-const allUnits = computed(() => {
-  return projectBuildings.value.flatMap(b => b.units.map(u => {
-    const detailed = u.detailedUnitId ? appStore.detailedUnits.find(du => du.id === u.detailedUnitId) : null;
-    return {
-      ...u,
-      // Priority to official data if linked
-      status: detailed ? (detailed.entregada ? 'delivered' : (detailed.saldo ? 'financing' : u.status)) : u.status,
-      balance: detailed ? (detailed.adeudado || 0) : (u.balance || 0),
-      client: detailed ? detailed.nombre : null,
-      deliveryDate: detailed ? detailed.fechaEntregaInspeccion : u.deliveryDate,
-      price: detailed ? (detailed.precio || 0) : (u.price || 0)
-    };
-  }));
-});
+const normalizeStatus = (unit: { estado?: string; entregada?: boolean | null; saldo?: boolean | null; enInspeccion?: boolean | null }): 'available' | 'delivered' | 'financing' | 'inspection' | 'sold' | 'observation' => {
+  if (unit.entregada) return 'delivered';
+  if (unit.saldo) return 'financing';
 
-const totalUnits = computed(() => allUnits.value.length);
+  const estado = (unit.estado || '').toLowerCase();
+  if (estado.includes('entreg')) return 'delivered';
+  if (estado.includes('financ')) return 'financing';
+  if (estado.includes('inspecc')) return 'inspection';
+  if (estado.includes('vend')) return 'sold';
+  if (estado.includes('observ')) return 'observation';
+  if (unit.enInspeccion) return 'inspection';
+  return 'available';
+};
+
+// The apartments endpoint already loads only the current project's units.
+// Keep this computed source broad so dashboard stats reflect whatever the API returns.
+const projectApartments = computed(() => appStore.detailedUnits);
+
+const apartmentStatus = (apartment: (typeof projectApartments.value)[number]) => normalizeStatus(apartment);
+
+const totalUnits = computed(() => projectApartments.value.length || projectBuildings.value.reduce((acc, b) => acc + b.units.length, 0));
 
 const topCards = computed(() => {
-  const delivered = allUnits.value.filter(u => u.status === 'delivered').length;
-  const financing = allUnits.value.filter(u => u.status === 'financing').length;
-  const totalBalance = allUnits.value.reduce((acc, u) => acc + (u.balance || 0), 0);
-  const inspection = allUnits.value.filter(u => u.status === 'inspection').length;
-  const observation = allUnits.value.filter(u => u.status === 'observation').length;
+  const delivered = projectApartments.value.filter(u => apartmentStatus(u) === 'delivered').length;
+  const financing = projectApartments.value.filter(u => apartmentStatus(u) === 'financing').length;
+  const totalBalance = projectApartments.value.reduce((acc, u) => acc + (u.adeudado || 0), 0);
+  const inspection = projectApartments.value.filter(u => apartmentStatus(u) === 'inspection').length;
+  const observation = projectApartments.value.filter(u => apartmentStatus(u) === 'observation').length;
 
   return [
     { label: 'Total Unidades', value: totalUnits.value, subtext: `En ${buildingsCount.value} edificios`, icon: 'bi-grid-3x3-gap', colorClass: 'bg-blue-soft', subColor: 'text-slate-400' },
-    { label: 'Entregadas', value: delivered, subtext: `${Math.round((delivered / totalUnits.value) * 100)}% del total`, icon: 'bi-check-circle', colorClass: 'bg-green-soft', subColor: 'text-green-600' },
+    { label: 'Entregadas', value: delivered, subtext: totalUnits.value > 0 ? `${Math.round((delivered / totalUnits.value) * 100)}% del total` : 'Sin datos', icon: 'bi-check-circle', colorClass: 'bg-green-soft', subColor: 'text-green-600' },
     { label: 'En Financiamiento', value: financing, subtext: `Balance: RD$ ${(totalBalance / 1000000).toFixed(1)}M`, icon: 'bi-bank', colorClass: 'bg-blue-soft', subColor: 'text-blue-600' },
     { label: 'En Inspección', value: inspection, subtext: 'Pendientes de entrega', icon: 'bi-search', colorClass: 'bg-cyan-soft', subColor: 'text-slate-400' },
     { label: 'En Observación', value: observation, subtext: `${observation} unidades reportadas`, icon: 'bi-exclamation-triangle', colorClass: 'bg-red-soft', subColor: 'text-red-500' }
@@ -244,9 +258,9 @@ const topCards = computed(() => {
 // Calculate monthly deliveries for 2026
 const monthlyDeliveries = computed(() => {
   const counts = Array(12).fill(0);
-  allUnits.value.forEach(u => {
-    if (u.status === 'delivered' && u.deliveryDate) {
-      const date = new Date(u.deliveryDate);
+  projectApartments.value.forEach(u => {
+    if (apartmentStatus(u) === 'delivered' && u.fechaEntregaInspeccion) {
+      const date = new Date(u.fechaEntregaInspeccion);
       if (date.getFullYear() === 2026) {
         counts[date.getMonth()]++;
       }
@@ -259,15 +273,23 @@ const maxMonthlyDelivery = computed(() => Math.max(...monthlyDeliveries.value, 1
 
 const buildingStats = computed(() => {
   const colors = ['#3b82f6', '#8b5cf6', '#10b981', '#0ea5e9', '#ec4899', '#ef4444'];
+
+  const normalizeLabel = (label: string) => {
+    return label
+      .replace(/^bloque\s+/i, '')
+      .replace(/^torre\s+/i, '')
+      .trim()
+      .toUpperCase();
+  };
+
   return projectBuildings.value.map((b, i) => {
-    const total = b.units.length;
-    // Map units within this building to their enriched versions for stats
-    const enrichedBldUnits = b.units.map(u => {
-        const detailed = u.detailedUnitId ? appStore.detailedUnits.find(du => du.id === u.detailedUnitId) : null;
-        return detailed ? { ...u, status: detailed.entregada ? 'delivered' : u.status } : u;
-    });
-    
-    const delivered = enrichedBldUnits.filter(u => u.status === 'delivered').length;
+    const buildingKey = normalizeLabel(b.name);
+    const matchedApartments = projectApartments.value.filter(u =>
+      normalizeLabel(u.edificio || '') === buildingKey
+    );
+
+    const total = matchedApartments.length || b.units.length;
+    const delivered = matchedApartments.filter(u => apartmentStatus(u) === 'delivered').length;
     const progress = total > 0 ? Math.round((delivered / total) * 100) : 0;
     return {
       id: b.id,
@@ -281,19 +303,19 @@ const buildingStats = computed(() => {
 });
 
 const statusLegend = computed(() => [
-  { label: 'Entregada', count: allUnits.value.filter(u => u.status === 'delivered').length, color: '#22c55e' },
-  { label: 'Saldo pend.', count: allUnits.value.filter(u => u.status === 'financing').length, color: '#3b82f6' },
-  { label: 'Inspección', count: allUnits.value.filter(u => u.status === 'inspection').length, color: '#06b6d4' },
-  { label: 'Disponibles', count: allUnits.value.filter(u => u.status === 'available').length, color: '#6366f1' }
+  { label: 'Entregada', count: projectApartments.value.filter(u => apartmentStatus(u) === 'delivered').length, color: '#22c55e' },
+  { label: 'Saldo pend.', count: projectApartments.value.filter(u => apartmentStatus(u) === 'financing').length, color: '#3b82f6' },
+  { label: 'Inspección', count: projectApartments.value.filter(u => apartmentStatus(u) === 'inspection').length, color: '#06b6d4' },
+  { label: 'Disponibles', count: projectApartments.value.filter(u => apartmentStatus(u) === 'available').length, color: '#6366f1' }
 ]);
 
 const recentActivities = computed(() => {
   // Just showing the first 5 project relevant units for display
-  return allUnits.value
-    .filter(u => u.status !== 'available')
+  return projectApartments.value
+    .filter(u => apartmentStatus(u) !== 'available')
     .slice(0, 5)
     .map((u) => {
-      const b = projectBuildings.value.find(b => b.id === u.buildingId);
+      const b = projectBuildings.value.find(b => b.name.toUpperCase().includes(u.edificio.toUpperCase()));
       const statusMap: Record<string, { label: string, class: string }> = {
         delivered: { label: 'Entregada', class: 'status-green' },
         financing: { label: 'Saldo', class: 'status-blue' },
@@ -301,11 +323,12 @@ const recentActivities = computed(() => {
         sold: { label: 'Vendida', class: 'status-indigo' },
         observation: { label: 'Observación', class: 'status-red' }
       };
-      const st = statusMap[u.status] || { label: u.status, class: 'status-blue' };
+      const unitStatus = apartmentStatus(u);
+      const st = statusMap[unitStatus] || { label: unitStatus, class: 'status-blue' };
       
       return {
         id: u.id,
-        unit: u.name,
+        unit: u.codUnidad || `${u.edificio}-${u.unidad}`,
         building: b ? b.name : 'N/A',
         status: st.label,
         statusClass: st.class
@@ -391,6 +414,26 @@ const recentActivities = computed(() => {
 .viewport-wrapper {
   height: 100%;
   width: 100%;
+}
+
+.layout-notice {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  z-index: 5;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 251, 235, 0.95);
+  color: #92400e;
+  border: 1px solid #fde68a;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 24px rgba(251, 191, 36, 0.12);
+  font-weight: 600;
+  font-size: 0.9rem;
 }
 
 .legend-item {

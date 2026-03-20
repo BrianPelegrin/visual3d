@@ -7,6 +7,9 @@ export interface Unit {
     detailedUnitId: number | null; // ID of the DetailedUnit record
     buildingId: string;
     name: string;
+    codUnidad?: string;
+    detailedUnitCode?: string;
+    externalUnitCode?: string;
     status: UnitStatus;
     paid: boolean;
     price?: number;
@@ -28,6 +31,7 @@ export interface Building {
     name: string;
     position: { x: number, z: number };
     dimensions: { width: number, depth: number, height: number };
+    rotationY: number;
     units: Unit[];
 }
 
@@ -40,7 +44,7 @@ export interface Blueprint {
 export type UserRole = 'admin' | 'editor' | 'viewer';
 
 export interface User {
-    id: string;
+    id: number;
     name: string;
     email: string;
     role: UserRole;

@@ -156,6 +156,21 @@
             <label class="form-label text-slate-500 smaller-text fw-bold">EMAIL</label>
             <input v-model="form.email" type="email" class="form-control" required placeholder="juan@example.com">
           </div>
+          <div class="mb-3">
+            <label class="form-label text-slate-500 smaller-text fw-bold">
+              {{ isEditing ? 'NUEVA CONTRASEÑA (OPCIONAL)' : 'CONTRASEÑA' }}
+            </label>
+            <input
+              v-model="form.password"
+              type="password"
+              class="form-control"
+              :required="!isEditing"
+              :placeholder="isEditing ? 'Dejar en blanco para mantener la actual' : 'Ingresa una contraseña segura'"
+            >
+            <div v-if="isEditing" class="smaller-text text-slate-400 mt-1">
+              Solo completa este campo si quieres cambiar la contraseña del usuario.
+            </div>
+          </div>
           <div class="mb-4">
             <label class="form-label text-slate-500 smaller-text fw-bold">ROL</label>
             <select v-model="form.role" class="form-select" required>
@@ -234,13 +249,14 @@ const startIndex = computed(() => (currentPage.value - 1) * itemsPerPage);
 // Modal & Form State
 const showModal = ref(false);
 const isEditing = ref(false);
-const editingUserId = ref<string | null>(null);
+const editingUserId = ref<number | null>(null);
 const showDeleteConfirm = ref(false);
 const userToDelete = ref<User | null>(null);
 
 const form = reactive({
   name: '',
   email: '',
+  password: '',
   role: 'viewer' as UserRole
 });
 
@@ -267,6 +283,7 @@ const openAddModal = () => {
   editingUserId.value = null;
   form.name = '';
   form.email = '';
+  form.password = '';
   form.role = 'viewer';
   showModal.value = true;
 };
@@ -276,6 +293,7 @@ const openEditModal = (user: User) => {
   editingUserId.value = user.id;
   form.name = user.name;
   form.email = user.email;
+  form.password = '';
   form.role = user.role;
   showModal.value = true;
 };
@@ -284,11 +302,18 @@ const closeModal = () => {
   showModal.value = false;
 };
 
-const saveUser = () => {
+const saveUser = async () => {
+  const payload = {
+    name: form.name,
+    email: form.email,
+    role: form.role,
+    ...(form.password ? { password: form.password } : {})
+  };
+
   if (isEditing.value && editingUserId.value) {
-    updateUser(editingUserId.value, { ...form });
+    await updateUser(editingUserId.value, payload);
   } else {
-    addUser({ ...form });
+    await addUser(payload);
   }
   closeModal();
 };
@@ -298,9 +323,9 @@ const confirmDelete = (user: User) => {
   showDeleteConfirm.value = true;
 };
 
-const doDelete = () => {
+const doDelete = async () => {
   if (userToDelete.value) {
-    deleteUser(userToDelete.value.id);
+    await deleteUser(userToDelete.value.id);
   }
   showDeleteConfirm.value = false;
   userToDelete.value = null;

@@ -80,16 +80,19 @@ const errorMessage = ref('');
 const handleLogin = async () => {
   loading.value = true;
   errorMessage.value = '';
-  
-  // Simulate network delay
-  await new Promise(resolve => setTimeout(resolve, 1200));
-  
-  const success = await login(email.value, password.value);
-  
-  if (success) {
-    router.push('/projects');
-  } else {
+
+  try {
+    const success = await login(email.value, password.value);
+
+    if (success) {
+      router.push('/projects');
+      return;
+    }
+
     errorMessage.value = 'Credenciales inválidas. Verifica tu correo y contraseña.';
+  } catch (_error) {
+    errorMessage.value = 'No se pudo conectar con el servidor de autenticación.';
+  } finally {
     loading.value = false;
   }
 };

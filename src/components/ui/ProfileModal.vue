@@ -131,26 +131,28 @@ const handleSave = async () => {
     };
 
     if (shouldUpdatePassword.value) {
-      // Basic verification (for demo purposes)
-      if (formData.oldPassword !== currentUser.value?.password) {
-        error.value = 'La contraseña actual es incorrecta.';
-        isSaving.value = false;
-        return;
-      }
-      
       if (!formData.password || formData.password.length < 4) {
         error.value = 'La nueva contraseña debe tener al menos 4 caracteres.';
         isSaving.value = false;
         return;
       }
+
+      if (!formData.oldPassword) {
+        error.value = 'Debes indicar tu contraseña actual.';
+        isSaving.value = false;
+        return;
+      }
       
       updates.password = formData.password;
+      updates.oldPassword = formData.oldPassword;
     }
 
-    // Simulate small delay for premium feel
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    updateProfile(updates);
+    const updated = await updateProfile(updates);
+    if (!updated) {
+      error.value = 'No se pudo actualizar el perfil.';
+      return;
+    }
+
     close();
   } catch (e: any) {
     error.value = 'Ocurrió un error al actualizar el perfil.';
