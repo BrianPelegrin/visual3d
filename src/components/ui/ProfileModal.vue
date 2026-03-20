@@ -155,7 +155,7 @@ const handleSave = async () => {
 
     close();
   } catch (e: any) {
-    error.value = 'Ocurrió un error al actualizar el perfil.';
+    error.value = e?.message || 'Ocurrió un error al actualizar el perfil.';
   } finally {
     isSaving.value = false;
   }

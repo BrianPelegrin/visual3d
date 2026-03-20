@@ -45,6 +45,7 @@ export type UserRole = 'admin' | 'editor' | 'viewer';
 
 export interface User {
     id: number;
+    codigo?: string | null;
     name: string;
     email: string;
     role: UserRole;

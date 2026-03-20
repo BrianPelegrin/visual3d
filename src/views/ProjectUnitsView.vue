@@ -16,6 +16,9 @@
           </p>
         </div>
         <div class="col-md-4 d-flex justify-content-md-end gap-2 mt-3 mt-md-0">
+          <router-link :to="`/dashboard/${projectId}`" class="btn btn-white shadow-sm border-0 px-3 py-2">
+            <i class="bi bi-speedometer2 me-2"></i>Dashboard
+          </router-link>
           <div class="badge bg-blue-soft text-blue-600 px-3 py-2 rounded-3 border">
             Total: {{ filteredUnits.length }} Unidades
           </div>

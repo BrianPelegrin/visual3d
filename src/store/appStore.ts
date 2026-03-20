@@ -620,20 +620,75 @@ export const updateUser = async (id: number, updates: Partial<User> & { oldPassw
 
 export const updateProfile = async (updates: Partial<User> & { oldPassword?: string }): Promise<User | null> => {
     if (!appStore.currentUser) return null;
-    
-    const userId = appStore.currentUser.id;
 
-    const updatedUser = await updateUser(userId, updates);
-    if (!updatedUser) return null;
+    const requestPayload = {
+        id: appStore.currentUser.id,
+        ...updates
+    };
 
-    appStore.currentUser = updatedUser;
-    persistAuthSession({
-        user: updatedUser,
-        accessToken: appStore.accessToken,
-        refreshToken: appStore.refreshToken
-    });
+    const trySaveProfile = async (method: 'PUT' | 'PATCH') => {
+        const response = await fetch(`${API_BASE_URL}/Profile/me`, {
+            method,
+            headers: {
+                'Content-Type': 'application/json',
+                ...getAuthHeaders()
+            },
+            body: JSON.stringify(requestPayload)
+        });
 
-    return updatedUser;
+        return response;
+    };
+
+    try {
+        let response = await trySaveProfile('PUT');
+        if (response.status === 404 || response.status === 405) {
+            response = await trySaveProfile('PATCH');
+        }
+
+        if (!response.ok) {
+            let errorMessage = 'No se pudo actualizar el perfil.';
+            try {
+                const errorPayload = await response.json() as { message?: string };
+                if (typeof errorPayload?.message === 'string' && errorPayload.message.trim() !== '') {
+                    errorMessage = errorPayload.message;
+                }
+            } catch (_parseError) {
+                // Keep default message if error payload is not JSON.
+            }
+            throw new Error(errorMessage);
+        }
+
+        let responsePayload: unknown = null;
+        try {
+            responsePayload = await response.json();
+        } catch (_parseError) {
+            responsePayload = null;
+        }
+
+        const updatedUser = normalizeUserResponse(responsePayload) ?? {
+            ...appStore.currentUser,
+            ...updates
+        };
+
+        appStore.currentUser = updatedUser;
+        const index = appStore.users.findIndex(user => user.id === updatedUser.id);
+        if (index > -1) {
+            appStore.users[index] = updatedUser;
+        }
+
+        persistAuthSession({
+            user: updatedUser,
+            accessToken: appStore.accessToken,
+            refreshToken: appStore.refreshToken
+        });
+
+        return updatedUser;
+    } catch (error) {
+        if (error instanceof Error) {
+            throw error;
+        }
+        throw new Error('No se pudo actualizar el perfil.');
+    }
 };
 
 export const deleteUser = async (id: number) => {
