@@ -571,7 +571,14 @@ export const addUser = async (userData: Omit<User, 'id'>) => {
 
 export const updateUser = async (id: number, updates: Partial<User> & { oldPassword?: string }): Promise<User | null> => {
     const user = appStore.users.find(u => u.id === id);
-    const nextUser = user ? { ...user, ...updates, id } : null;
+    const normalizedPassword = typeof updates.password === 'string' ? updates.password.trim() : '';
+    const requestPayload = {
+        ...(user ?? { id }),
+        ...updates,
+        ...(normalizedPassword ? { password: normalizedPassword, newPassword: normalizedPassword } : {}),
+        id
+    };
+    const nextUser = user ? { ...user, ...updates, ...(normalizedPassword ? { password: normalizedPassword } : {}), id } : null;
 
     try {
         const response = await fetch(`${API_BASE_URL}/Users/${id}`, {
@@ -580,11 +587,7 @@ export const updateUser = async (id: number, updates: Partial<User> & { oldPassw
                 'Content-Type': 'application/json',
                 ...getAuthHeaders()
             },
-            body: JSON.stringify({
-                ...(user ?? { id }),
-                ...updates,
-                id
-            })
+            body: JSON.stringify(requestPayload)
         });
 
         if (response.ok) {

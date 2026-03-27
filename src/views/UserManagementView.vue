@@ -303,11 +303,12 @@ const closeModal = () => {
 };
 
 const saveUser = async () => {
+  const normalizedPassword = form.password.trim();
   const payload = {
     name: form.name,
     email: form.email,
     role: form.role,
-    ...(form.password ? { password: form.password } : {})
+    ...(normalizedPassword ? { password: normalizedPassword } : {})
   };
 
   if (isEditing.value && editingUserId.value) {
