@@ -51,12 +51,43 @@
           </div>
 
           <div class="glass-input-group mt-3">
+            <label class="glass-label">Dimensiones (Ancho, Largo)</label>
+            <div class="position-inputs">
+              <div class="coord-input">
+                <span>Ancho</span>
+                <input type="number" min="1" max="50" step="0.5" v-model.number="buildingWidth" @change="updateDimensions" />
+              </div>
+              <div class="coord-input">
+                <span>Largo</span>
+                <input type="number" min="1" max="50" step="0.5" v-model.number="buildingDepth" @change="updateDimensions" />
+              </div>
+            </div>
+          </div>
+
+          <div class="glass-input-group mt-3">
             <label class="glass-label">Rotación del Edificio</label>
             <div class="rotation-control">
               <input type="range" min="0" max="359" step="1" v-model.number="buildingRotationY" @input="updateRotation" />
               <div class="rotation-readout">
                 <span>{{ buildingRotationY }}°</span>
               </div>
+            </div>
+          </div>
+
+          <div class="glass-input-group mt-3">
+            <label class="glass-label">Distribución por Piso</label>
+            <div class="position-inputs">
+              <div class="coord-input">
+                <span>Cols</span>
+                <input type="number" min="1" max="12" step="1" v-model.number="buildingLayoutCols" @change="applyBuildingLayout" />
+              </div>
+              <div class="coord-input">
+                <span>Rows</span>
+                <input type="number" min="1" max="12" step="1" v-model.number="buildingLayoutRows" @change="applyBuildingLayout" />
+              </div>
+            </div>
+            <div class="small text-muted mt-1">
+              {{ unitsPerFloorLabel }} por piso. Reorganiza automáticamente las unidades existentes al cambiar la distribución.
             </div>
           </div>
 
@@ -166,7 +197,7 @@
 
 <script setup lang="ts">
 import { computed, watch, ref } from 'vue';
-import { appStore, selectBuilding, selectUnit, updateBuildingPosition, addUnitToBuilding, updateUnit, deleteBuilding, deleteUnit, updateBuilding, canEditData, canDeleteData, isViewer } from '../../store/appStore';
+import { appStore, selectBuilding, selectUnit, updateBuildingPosition, addUnitToBuilding, updateUnit, deleteBuilding, deleteUnit, updateBuilding, updateBuildingUnitLayout, canEditData, canDeleteData, isViewer } from '../../store/appStore';
 
 const re_canEditData = () => canEditData();
 const re_canDeleteData = () => canDeleteData();
@@ -208,6 +239,10 @@ const closePanel = () => {
 const buildingPositionX = ref(0);
 const buildingPositionZ = ref(0);
 const buildingRotationY = ref(0);
+const buildingWidth = ref(3);
+const buildingDepth = ref(3);
+const buildingLayoutCols = ref(2);
+const buildingLayoutRows = ref(2);
 
 const buildingName = computed({
     get: () => selectedBuilding.value?.name || '',
@@ -223,6 +258,10 @@ watch(selectedBuilding, (val) => {
     buildingPositionX.value = val.position.x;
     buildingPositionZ.value = val.position.z;
     buildingRotationY.value = val.rotationY ?? 0;
+    buildingWidth.value = val.dimensions.width ?? 3;
+    buildingDepth.value = val.dimensions.depth ?? 3;
+    buildingLayoutCols.value = val.layoutCols ?? 2;
+    buildingLayoutRows.value = val.layoutRows ?? 2;
   }
 }, { immediate: true });
 
@@ -242,6 +281,38 @@ const updateRotation = () => {
         });
     }
 };
+
+const updateDimensions = () => {
+    if (!selectedBuildingId.value || !selectedBuilding.value) return;
+    const width = Math.max(1, Math.min(50, Number(buildingWidth.value) || 1));
+    const depth = Math.max(1, Math.min(50, Number(buildingDepth.value) || 1));
+    buildingWidth.value = width;
+    buildingDepth.value = depth;
+
+    updateBuilding(selectedBuildingId.value, {
+        dimensions: {
+            width,
+            depth,
+            height: selectedBuilding.value.dimensions.height
+        }
+    });
+};
+
+const applyBuildingLayout = () => {
+    if (!selectedBuildingId.value) return;
+    const cols = Math.max(1, Math.min(12, Math.round(buildingLayoutCols.value || 1)));
+    const rows = Math.max(1, Math.min(12, Math.round(buildingLayoutRows.value || 1)));
+    buildingLayoutCols.value = cols;
+    buildingLayoutRows.value = rows;
+    updateBuildingUnitLayout(selectedBuildingId.value, cols, rows);
+};
+
+const unitsPerFloorLabel = computed(() => {
+    const cols = Math.max(1, Math.round(buildingLayoutCols.value || 1));
+    const rows = Math.max(1, Math.round(buildingLayoutRows.value || 1));
+    const count = cols * rows;
+    return `${count} unidad${count === 1 ? '' : 'es'}`;
+});
 
 const addUnit = () => {
     if (selectedBuildingId.value) {

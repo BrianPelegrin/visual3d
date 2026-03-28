@@ -227,6 +227,61 @@ type ProjectLayoutResponse = {
     };
 };
 
+const DEFAULT_LAYOUT_COLS = 2;
+const DEFAULT_LAYOUT_ROWS = 2;
+const MAX_LAYOUT_COLS = 12;
+const MAX_LAYOUT_ROWS = 12;
+
+const normalizeLayoutDimension = (value: unknown, fallback: number, max: number) => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return Math.min(max, Math.max(1, Math.round(value)));
+    }
+    return fallback;
+};
+
+const getUnitsPerFloor = (layoutCols: number, layoutRows: number) => layoutCols * layoutRows;
+
+const getDefaultFloorAndSlot = (index: number, unitsPerFloor: number) => {
+    const floor = Math.floor(index / unitsPerFloor) + 1;
+    const slot = index % unitsPerFloor;
+    return { floor, slot };
+};
+
+const normalizeUnitsFloorSlots = (units: Unit[], unitsPerFloor: number) => units.map((unit, index) => {
+    const fallback = getDefaultFloorAndSlot(index, unitsPerFloor);
+    return {
+        ...unit,
+        floor: typeof unit.floor === 'number' && unit.floor > 0 ? unit.floor : fallback.floor,
+        slot: typeof unit.slot === 'number' && unit.slot >= 0 && unit.slot < unitsPerFloor ? unit.slot : fallback.slot
+    };
+});
+
+const getNextUnitFloorAndSlot = (units: Unit[], unitsPerFloor: number) => {
+    const occupied = new Set(units.map(unit => `${unit.floor}:${unit.slot}`));
+    const maxFloor = units.reduce((max, unit) => Math.max(max, unit.floor || 1), 1);
+
+    for (let floor = 1; floor <= maxFloor + 1; floor++) {
+        for (let slot = 0; slot < unitsPerFloor; slot++) {
+            if (!occupied.has(`${floor}:${slot}`)) {
+                return { floor, slot };
+            }
+        }
+    }
+
+    return { floor: maxFloor + 1, slot: 0 };
+};
+
+const createAutoUnit = (buildingId: string, index: number, floor: number, slot: number): Unit => ({
+    id: `unt_${generateId()}`,
+    detailedUnitId: null,
+    buildingId,
+    name: `Apto ${index}`,
+    floor,
+    slot,
+    status: 'available',
+    paid: false
+});
+
 const normalizeLayoutResponse = (payload: unknown): { gridSize?: number; buildings: Building[] } => {
     if (!payload || typeof payload !== 'object') {
         return { buildings: [] };
@@ -238,17 +293,25 @@ const normalizeLayoutResponse = (payload: unknown): { gridSize?: number; buildin
 
     return {
         gridSize: source.gridSize,
-        buildings: buildings.map((building) => ({
-            ...building,
-            projectId: building.projectId ?? candidate.projectId ?? appStore.currentProjectId ?? '',
-            rotationY: building.rotationY ?? 0,
-            units: Array.isArray(building.units)
-                ? building.units.map((unit) => ({
-                    ...unit,
-                    buildingId: unit.buildingId ?? building.id
-                }))
-                : []
-        }))
+        buildings: buildings.map((building) => {
+            const layoutCols = normalizeLayoutDimension((building as Partial<Building>).layoutCols, DEFAULT_LAYOUT_COLS, MAX_LAYOUT_COLS);
+            const layoutRows = normalizeLayoutDimension((building as Partial<Building>).layoutRows, DEFAULT_LAYOUT_ROWS, MAX_LAYOUT_ROWS);
+            const unitsPerFloor = getUnitsPerFloor(layoutCols, layoutRows);
+
+            return {
+                ...building,
+                projectId: building.projectId ?? candidate.projectId ?? appStore.currentProjectId ?? '',
+                rotationY: building.rotationY ?? 0,
+                layoutCols,
+                layoutRows,
+                units: Array.isArray(building.units)
+                    ? normalizeUnitsFloorSlots(building.units.map((unit) => ({
+                        ...unit,
+                        buildingId: unit.buildingId ?? building.id
+                    })), unitsPerFloor)
+                    : []
+            };
+        })
     };
 };
 
@@ -421,6 +484,8 @@ export const addBuilding = (position: { x: number, z: number }) => {
         position,
         dimensions: { width: 3, depth: 3, height: 8 }, // 3x3 default
         rotationY: 0,
+        layoutCols: DEFAULT_LAYOUT_COLS,
+        layoutRows: DEFAULT_LAYOUT_ROWS,
         units: []
     };
     
@@ -430,6 +495,8 @@ export const addBuilding = (position: { x: number, z: number }) => {
         detailedUnitId: null,
         buildingId: buildingId,
         name: `Unidad 1`,
+        floor: 1,
+        slot: 0,
         status: 'available',
         paid: false
     };
@@ -451,18 +518,72 @@ export const setVisualFilters = (filters: Partial<AppState['visualFilters']>) =>
 export const addUnitToBuilding = (buildingId: string) => {
     const bld = appStore.buildings.find(b => b.id === buildingId);
     if (!bld) return null;
+    const unitsPerFloor = getUnitsPerFloor(
+        normalizeLayoutDimension(bld.layoutCols, DEFAULT_LAYOUT_COLS, MAX_LAYOUT_COLS),
+        normalizeLayoutDimension(bld.layoutRows, DEFAULT_LAYOUT_ROWS, MAX_LAYOUT_ROWS)
+    );
+    const nextPlacement = getNextUnitFloorAndSlot(bld.units, unitsPerFloor);
 
     const newUnit: Unit = {
         id: `unt_${generateId()}`,
         detailedUnitId: null,
         buildingId: bld.id,
         name: `Apto ${bld.units.length + 1}`,
+        floor: nextPlacement.floor,
+        slot: nextPlacement.slot,
         status: 'available',
         paid: false
     };
 
     bld.units.push(newUnit);
     return newUnit;
+};
+
+export const updateBuildingUnitLayout = (buildingId: string, layoutCols: number, layoutRows: number) => {
+    const bld = appStore.buildings.find(b => b.id === buildingId);
+    if (!bld) return;
+
+    const previousUnitsPerFloor = getUnitsPerFloor(
+        normalizeLayoutDimension(bld.layoutCols, DEFAULT_LAYOUT_COLS, MAX_LAYOUT_COLS),
+        normalizeLayoutDimension(bld.layoutRows, DEFAULT_LAYOUT_ROWS, MAX_LAYOUT_ROWS)
+    );
+    const normalizedCurrentUnits = normalizeUnitsFloorSlots(
+        bld.units.map((unit) => ({ ...unit })),
+        previousUnitsPerFloor
+    );
+
+    const normalizedCols = normalizeLayoutDimension(layoutCols, DEFAULT_LAYOUT_COLS, MAX_LAYOUT_COLS);
+    const normalizedRows = normalizeLayoutDimension(layoutRows, DEFAULT_LAYOUT_ROWS, MAX_LAYOUT_ROWS);
+    const unitsPerFloor = getUnitsPerFloor(normalizedCols, normalizedRows);
+
+    bld.layoutCols = normalizedCols;
+    bld.layoutRows = normalizedRows;
+
+    // If the layout grows (e.g. 1x1 -> 2x2), auto-complete all slots for each current floor.
+    if (unitsPerFloor > previousUnitsPerFloor) {
+        const targetFloors = Math.max(1, ...normalizedCurrentUnits.map(unit => unit.floor || 1));
+        const units = [...normalizedCurrentUnits];
+        const occupied = new Set(units.map(unit => `${unit.floor}:${unit.slot}`));
+        let createdCount = 0;
+
+        for (let floor = 1; floor <= targetFloors; floor++) {
+            for (let slot = 0; slot < unitsPerFloor; slot++) {
+                const key = `${floor}:${slot}`;
+                if (occupied.has(key)) continue;
+                createdCount += 1;
+                const createdUnit = createAutoUnit(buildingId, normalizedCurrentUnits.length + createdCount, floor, slot);
+                units.push(createdUnit);
+                occupied.add(key);
+            }
+        }
+
+        bld.units = units
+            .sort((a, b) => (a.floor - b.floor) || (a.slot - b.slot))
+            .map(unit => ({ ...unit }));
+        return;
+    }
+
+    bld.units = normalizeUnitsFloorSlots(normalizedCurrentUnits, unitsPerFloor);
 };
 
 export const updateUnit = (buildingId: string, unitId: string, updates: Partial<Unit>) => {

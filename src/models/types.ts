@@ -7,6 +7,8 @@ export interface Unit {
     detailedUnitId: number | null; // ID of the DetailedUnit record
     buildingId: string;
     name: string;
+    floor: number;
+    slot: number;
     codUnidad?: string;
     detailedUnitCode?: string;
     externalUnitCode?: string;
@@ -16,7 +18,6 @@ export interface Unit {
     balance?: number;
     deliveryDate?: string; // ISO format: YYYY-MM-DD
     bank?: string;
-    floor?: number;
     hasDebt?: boolean;
     enInspeccion?: boolean;
     legal?: boolean;
@@ -32,6 +33,8 @@ export interface Building {
     position: { x: number, z: number };
     dimensions: { width: number, depth: number, height: number };
     rotationY: number;
+    layoutCols: number;
+    layoutRows: number;
     units: Unit[];
 }
 

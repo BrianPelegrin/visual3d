@@ -227,21 +227,35 @@ export class SceneManager {
             }
 
             // 1. Constants and Positioning
-            const unitHeight = 0.3; // Reduced from 0.5
-            const padding = 0.03;   // Reduced from 0.05
-            const baseHeight = 0.2; // Reduced from 0.4
-            const roofHeight = 0.15; // Reduced from 0.3
-            
-            // Calculate total stack height for positioning
-            const stackHeight = bld.units.length * (unitHeight + padding);
-            
+            const unitHeight = 0.3;
+            const padding = 0.03;
+            const baseHeight = 0.2;
+            const roofHeight = 0.15;
+            const layoutCols = Math.max(1, Math.min(12, Math.round(Number(bld.layoutCols) || 2)));
+            const layoutRows = Math.max(1, Math.min(12, Math.round(Number(bld.layoutRows) || 2)));
+            const unitsPerFloor = layoutCols * layoutRows;
+
+            const normalizedUnits: Array<{ unit: any; floor: number; slot: number }> = bld.units.map((unit: any, index: number) => {
+                const fallbackFloor = Math.floor(index / unitsPerFloor) + 1;
+                const fallbackSlot = index % unitsPerFloor;
+                const floor = typeof unit.floor === 'number' && unit.floor > 0 ? unit.floor : fallbackFloor;
+                const slot = typeof unit.slot === 'number' && unit.slot >= 0 && unit.slot < unitsPerFloor ? unit.slot : fallbackSlot;
+                return { unit, floor, slot };
+            });
+
+            const maxFloor = Math.max(1, ...normalizedUnits.map((item) => item.floor));
+            const floorStep = unitHeight + padding;
+            const stackHeight = maxFloor * floorStep;
+
             // We set the group Y so the bottom of the base sits at 0
-            // The body starts at baseHeight above 0
             const fullY = (stackHeight / 2) + baseHeight;
             group.position.set(bld.position.x, fullY, bld.position.z);
 
-            const startY = -(stackHeight / 2); // Bottom of the building body (above the base)
-            const labelY = startY + stackHeight + 0.3;
+            const startY = -(stackHeight / 2) + (unitHeight / 2);
+            const bodyBottomY = startY - (unitHeight / 2);
+            const topUnitCenterY = startY + ((maxFloor - 1) * floorStep);
+            const bodyTopY = topUnitCenterY + (unitHeight / 2);
+            const labelY = bodyTopY + roofHeight + 0.3;
 
             // Update Label
             let labelObj = group.children.find(c => (c as any).isCSS2DObject) as any;
@@ -271,7 +285,7 @@ export class SceneManager {
             // Re-add pick surfaces, footprint and units
             const buildingPickGeo = new THREE.BoxGeometry(
                 bld.dimensions.width * 1.04,
-                Math.max(stackHeight + baseHeight + roofHeight, 1),
+                Math.max(stackHeight + baseHeight + roofHeight + padding, 1),
                 bld.dimensions.depth * 1.04
             );
             const buildingPickMat = new THREE.MeshBasicMaterial({
@@ -296,14 +310,29 @@ export class SceneManager {
             });
             const footprint = new THREE.Mesh(footprintGeo, footprintMat);
             footprint.rotation.x = -Math.PI / 2;
-            footprint.position.y = startY;
+            footprint.position.y = bodyBottomY;
             footprint.userData = { id: bld.id, buildingId: bld.id, isBuildingVisual: true };
             group.add(footprint);
 
-            const uW = bld.dimensions.width * 0.95;
-            const uD = bld.dimensions.depth * 0.95;
+            const innerWidth = bld.dimensions.width * 0.92;
+            const innerDepth = bld.dimensions.depth * 0.92;
+            const gapX = layoutCols > 1 ? Math.min(0.08, innerWidth * 0.08) : 0;
+            const gapZ = layoutRows > 1 ? Math.min(0.08, innerDepth * 0.08) : 0;
+            const totalGapX = gapX * (layoutCols - 1);
+            const totalGapZ = gapZ * (layoutRows - 1);
+            const uW = (innerWidth - totalGapX) / layoutCols;
+            const uD = (innerDepth - totalGapZ) / layoutRows;
 
-            bld.units.forEach((unit: any, index: number) => {
+            const getUnitPosition = (floor: number, slot: number) => {
+                const floorY = startY + ((floor - 1) * floorStep);
+                const row = Math.floor(slot / layoutCols);
+                const col = slot % layoutCols;
+                const localX = (-innerWidth / 2) + (uW / 2) + (col * (uW + gapX));
+                const localZ = (-innerDepth / 2) + (uD / 2) + (row * (uD + gapZ));
+                return new THREE.Vector3(localX, floorY, localZ);
+            };
+
+            normalizedUnits.forEach(({ unit, floor, slot }: { unit: any; floor: number; slot: number }) => {
                 const colorHex = globalRulesEngine.resolveColor(unit);
                 const isSelectedUnit = selectedUnitId !== null && unit.id === selectedUnitId;
                 
@@ -332,8 +361,7 @@ export class SceneManager {
                 });
                 const uMesh = new THREE.Mesh(unitGeometry, uMat);
                 uMesh.scale.set(uW, unitHeight, uD);
-                const posY = startY + (index * (unitHeight + padding)) + (unitHeight / 2) + padding;
-                uMesh.position.set(0, posY, 0);
+                uMesh.position.copy(getUnitPosition(floor, slot));
                 uMesh.userData = { id: unit.id, buildingId: bld.id, isUnitVisual: true };
                 group.add(uMesh);
 
@@ -363,27 +391,18 @@ export class SceneManager {
                 group.add(edgesLine);
             });
 
-            // 3. Add Roof Cap
-            const roofGeo = new THREE.BoxGeometry(bld.dimensions.width * 0.98, roofHeight, bld.dimensions.depth * 0.98);
-            const roofMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5, metalness: 0.5 });
-            const roof = new THREE.Mesh(roofGeo, roofMat);
-            const roofY = startY + stackHeight + (roofHeight / 2);
-            roof.position.set(0, roofY, 0);
-            roof.userData = { id: bld.id, isBuilding: true };
-            group.add(roof);
-
-            // 4. Add Decorative Base
+            // 3. Add Decorative Base
             const baseGeo = new THREE.BoxGeometry(bld.dimensions.width * 1.02, baseHeight, bld.dimensions.depth * 1.02);
             const baseMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.9 });
             const base = new THREE.Mesh(baseGeo, baseMat);
-            base.position.set(0, startY - (baseHeight / 2), 0);
+            base.position.set(0, bodyBottomY - (baseHeight / 2), 0);
             base.userData = { id: bld.id, isBuilding: true };
             group.add(base);
 
-            // 5. Add Balconies (Architectural depth)
-            const balconyGeo = new THREE.BoxGeometry(bld.dimensions.width * 0.15, 0.05, bld.dimensions.depth * 0.04);
+            // 4. Add Balconies (Architectural depth)
+            const balconyGeo = new THREE.BoxGeometry(uW * 0.55, 0.05, uD * 0.08);
 
-            bld.units.forEach((unit: any, index: number) => {
+            normalizedUnits.forEach(({ unit, floor, slot }: { unit: any; floor: number; slot: number }) => {
                 const isSelectedUnit = selectedUnitId !== null && unit.id === selectedUnitId;
                 // Determine highlight based on ALL criteria
                 let isHighlighted = true;
@@ -397,22 +416,18 @@ export class SceneManager {
                     if (visualFilters.descargadaDGII !== null && !!unit.descargadaDGII !== visualFilters.descargadaDGII) isHighlighted = false;
                     if (visualFilters.saldo !== null && !!unit.saldo !== visualFilters.saldo) isHighlighted = false;
                 }
-                
-                const posY = startY + (index * (unitHeight + padding)) + (unitHeight / 2) + padding;
-                // Add two balconies per unit on the front face
-                for (let xOffset of [-bld.dimensions.width * 0.25, bld.dimensions.width * 0.25]) {
-                    const balconyMaterial = new THREE.MeshStandardMaterial({
-                        color: isSelectedUnit ? 0xf59e0b : 0xffffff,
-                        roughness: 0.2,
-                        transparent: isSelectedUnit ? false : !isHighlighted,
-                        opacity: isSelectedUnit ? 1 : (isHighlighted ? 1 : 0.15)
-                    });
-                    const balcony = new THREE.Mesh(balconyGeo, balconyMaterial);
-                    balcony.position.set(xOffset, posY, bld.dimensions.depth * 0.49);
-                    balcony.userData = { id: unit.id, buildingId: bld.id, isUnitVisual: true };
-                    
-                    group.add(balcony);
-                }
+
+                const basePos = getUnitPosition(floor, slot);
+                const balconyMaterial = new THREE.MeshStandardMaterial({
+                    color: isSelectedUnit ? 0xf59e0b : 0xffffff,
+                    roughness: 0.2,
+                    transparent: isSelectedUnit ? false : !isHighlighted,
+                    opacity: isSelectedUnit ? 1 : (isHighlighted ? 1 : 0.15)
+                });
+                const balcony = new THREE.Mesh(balconyGeo, balconyMaterial);
+                balcony.position.set(basePos.x, basePos.y, basePos.z + (uD * 0.5) + 0.01);
+                balcony.userData = { id: unit.id, buildingId: bld.id, isUnitVisual: true };
+                group.add(balcony);
             });
         });
     }
