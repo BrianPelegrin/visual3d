@@ -14,6 +14,9 @@
           </p>
         </div>
         <div class="col-md-4 d-flex flex-wrap justify-content-md-end gap-2 mt-3 mt-md-0">
+          <router-link :to="`/editor/${projectId}`" class="btn btn-white shadow-sm border-0 px-4 py-2 fw-bold">
+            <i class="bi bi-box-seam me-2"></i>Visualizador 3D
+          </router-link>
           <router-link :to="`/projects/${projectId}/units`" class="btn btn-primary-custom shadow-sm border-0 px-4 py-2 fw-bold">
             <i class="bi bi-file-earmark-text me-2"></i>Ver Unidades
           </router-link>
@@ -52,11 +55,16 @@
                 {{ selectedUnitSummary }}
               </div>
               <Viewport3D hideUI />
+              <ColorGuideModal :show="showColorGuide" @close="showColorGuide = false" />
               <div class="viewport-legend">
-                <div class="legend-item"><span class="dot bg-success"></span> Entregada</div>
-                <div class="legend-item"><span class="dot bg-warning"></span> Con saldo</div>
-                <div class="legend-item"><span class="dot bg-info"></span> En inspeccion</div>
-                <div class="legend-item"><span class="dot bg-primary"></span> Disponible</div>
+                <button class="legend-help-btn" @click="showColorGuide = true">
+                  <i class="bi bi-info-circle me-1"></i>
+                  Ayuda de colores
+                </button>
+                <div v-for="item in viewportLegendSegments" :key="item.label" class="legend-item">
+                  <span class="dot" :class="{ 'dot-outline': item.outline }" :style="{ backgroundColor: item.color }"></span>
+                  {{ item.label }}
+                </div>
               </div>
             </div>
           </div>
@@ -104,9 +112,11 @@
       <div class="row g-4 mb-4">
         <div class="col-xl-4 col-md-6">
           <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100">
-            <div class="d-flex justify-content-between align-items-center mb-4">
+            <div class="d-flex justify-content-between align-items-center mb-4 gap-2 flex-wrap">
               <h5 class="fw-bold text-slate-900 mb-0">Entregas por mes</h5>
-              <span class="badge bg-blue-100 text-blue-600 rounded-pill">{{ deliveryYearLabel }}</span>
+              <select v-model="selectedDeliveryYear" class="form-select form-select-sm year-select" :disabled="deliveredYears.length <= 1">
+                <option v-for="year in deliveredYears" :key="year" :value="String(year)">{{ year }}</option>
+              </select>
             </div>
 
             <div v-if="totalDeliveredByYear === 0" class="card-empty">
@@ -114,22 +124,8 @@
             </div>
 
             <div v-else>
-              <div class="chart-container d-flex align-items-end justify-content-between gap-2 px-1" style="height: 200px;">
-                <div
-                  v-for="(count, index) in monthlyDeliveries"
-                  :key="index"
-                  class="bar-item bg-blue-200 rounded-top"
-                  :title="`Mes ${index + 1}: ${count} entregas`"
-                  :style="{
-                    height: `${maxMonthlyDelivery > 0 ? (count * 100) / maxMonthlyDelivery : 0}%`,
-                    opacity: count > maxMonthlyDelivery / 2 ? 1 : 0.55,
-                    background: count > maxMonthlyDelivery / 2 ? '#3b82f6' : '#93c5fd'
-                  }"
-                ></div>
-              </div>
-              <div class="d-flex justify-content-between mt-3 text-slate-400 smaller-text px-1">
-                <span>Ene</span><span>Feb</span><span>Mar</span><span>Abr</span><span>May</span><span>Jun</span>
-                <span>Jul</span><span>Ago</span><span>Sep</span><span>Oct</span><span>Nov</span><span>Dic</span>
+              <div class="chart-panel">
+                <Bar :data="deliveryChartData" :options="deliveryChartOptions" />
               </div>
             </div>
           </div>
@@ -138,13 +134,9 @@
         <div class="col-xl-4 col-md-6">
           <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100">
             <h5 class="fw-bold text-slate-900 mb-4">Distribucion por estado</h5>
-            <div class="d-flex align-items-center justify-content-center h-100 donut-layout">
-              <div class="donut-wrapper position-relative" style="width: 180px; height: 180px;">
-                <div class="donut-conic" :style="donutStyle"></div>
-                <div class="donut-hole">
-                  <div class="fw-800 fs-4 text-slate-800">{{ totalUnits }}</div>
-                  <div class="smaller-text text-slate-400">TOTAL</div>
-                </div>
+            <div class="d-flex align-items-center justify-content-center h-100 donut-layout gap-3">
+              <div class="chart-panel chart-panel-donut">
+                <Doughnut :data="distributionChartData" :options="distributionChartOptions" />
               </div>
               <div class="donut-legend d-flex flex-column gap-2 ms-4">
                 <div v-for="segment in distributionSegments" :key="segment.label" class="legend-item-v2 d-flex align-items-center gap-2">
@@ -202,16 +194,40 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { appStore, selectProject, selectUnit, setAppMode } from '../store/appStore';
 import type { Unit, DetailedUnit } from '../models/types';
 import Viewport3D from '../components/Viewport3D.vue';
+import ColorGuideModal from '../components/ui/ColorGuideModal.vue';
+import { Bar, Doughnut } from 'vue-chartjs';
+import {
+  Chart as ChartJS,
+  ArcElement,
+  BarElement,
+  CategoryScale,
+  LinearScale,
+  Tooltip,
+  Legend
+} from 'chart.js';
+
+ChartJS.register(ArcElement, BarElement, CategoryScale, LinearScale, Tooltip, Legend);
 
 type DashboardStatus = 'available' | 'delivered' | 'financing' | 'inspection' | 'sold' | 'observation';
+type StatusMeta = { label: string; color: string; statusClass: string };
+
+const STATUS_META: Record<DashboardStatus, StatusMeta> = {
+  delivered: { label: 'Entregada', color: '#22c55e', statusClass: 'status-green' },
+  financing: { label: 'Con saldo', color: '#3b82f6', statusClass: 'status-blue' },
+  inspection: { label: 'Inspeccion', color: '#06b6d4', statusClass: 'status-cyan' },
+  sold: { label: 'Vendida', color: '#6366f1', statusClass: 'status-indigo' },
+  observation: { label: 'Observacion', color: '#ef4444', statusClass: 'status-red' },
+  available: { label: 'Disponible', color: '#94a3b8', statusClass: 'status-slate' }
+};
 
 const route = useRoute();
 const projectId = computed(() => String(route.params.id ?? ''));
+const showColorGuide = ref(false);
 
 const project = computed(() => appStore.projects.find((p) => p.id === projectId.value));
 const projectBuildings = computed(() => appStore.buildings.filter((b) => b.projectId === projectId.value));
@@ -350,11 +366,43 @@ const topCards = computed(() => {
   ];
 });
 
+const parseDateValue = (value: unknown): Date | null => {
+  if (value === null || value === undefined || value === '') return null;
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    // Excel serial date (days since 1899-12-30)
+    if (value > 20000) {
+      const ms = Math.round((value - 25569) * 86400 * 1000);
+      const date = new Date(ms);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+    const unix = new Date(value);
+    return Number.isNaN(unix.getTime()) ? null : unix;
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  const nativeParsed = new Date(raw);
+  if (!Number.isNaN(nativeParsed.getTime())) return nativeParsed;
+
+  const slash = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  if (slash) {
+    const day = Number(slash[1]);
+    const month = Number(slash[2]) - 1;
+    const year = Number(slash[3].length === 2 ? `20${slash[3]}` : slash[3]);
+    const custom = new Date(year, month, day);
+    return Number.isNaN(custom.getTime()) ? null : custom;
+  }
+
+  return null;
+};
+
 const deliveredYears = computed(() => {
   const years = effectiveUnits.value
     .filter((unit) => unit.status === 'delivered' && unit.deliveryDate)
-    .map((unit) => new Date(String(unit.deliveryDate)).getFullYear())
-    .filter((year) => Number.isFinite(year));
+    .map((unit) => parseDateValue(unit.deliveryDate)?.getFullYear())
+    .filter((year): year is number => typeof year === 'number' && Number.isFinite(year));
 
   if (years.length === 0) {
     return [new Date().getFullYear()];
@@ -363,23 +411,29 @@ const deliveredYears = computed(() => {
   return [...new Set(years)].sort((a, b) => b - a);
 });
 
-const selectedDeliveryYear = computed(() => deliveredYears.value[0]);
-const deliveryYearLabel = computed(() => String(selectedDeliveryYear.value));
+const selectedDeliveryYear = ref(String(new Date().getFullYear()));
+const selectedDeliveryYearValue = computed(() => Number(selectedDeliveryYear.value));
+
+watch(deliveredYears, (years) => {
+  if (!years.includes(selectedDeliveryYearValue.value)) {
+    selectedDeliveryYear.value = String(years[0] ?? new Date().getFullYear());
+  }
+}, { immediate: true });
 
 const monthlyDeliveries = computed(() => {
   const counts = Array(12).fill(0);
 
   for (const unit of effectiveUnits.value) {
     if (unit.status !== 'delivered' || !unit.deliveryDate) continue;
-    const date = new Date(String(unit.deliveryDate));
-    if (date.getFullYear() !== selectedDeliveryYear.value) continue;
+    const date = parseDateValue(unit.deliveryDate);
+    if (!date) continue;
+    if (date.getFullYear() !== selectedDeliveryYearValue.value) continue;
     counts[date.getMonth()] += 1;
   }
 
   return counts;
 });
 
-const maxMonthlyDelivery = computed(() => Math.max(...monthlyDeliveries.value, 1));
 const totalDeliveredByYear = computed(() => monthlyDeliveries.value.reduce((sum, value) => sum + value, 0));
 
 const buildingStats = computed(() => {
@@ -414,45 +468,75 @@ const buildingStats = computed(() => {
 });
 
 const distributionSegments = computed(() => ([
-  { label: 'Entregada', count: statusCounts.value.delivered, color: '#22c55e' },
-  { label: 'Con saldo', count: statusCounts.value.financing, color: '#3b82f6' },
-  { label: 'Inspeccion', count: statusCounts.value.inspection, color: '#06b6d4' },
-  { label: 'Disponible', count: statusCounts.value.available, color: '#6366f1' }
+  { label: STATUS_META.delivered.label, count: statusCounts.value.delivered, color: STATUS_META.delivered.color },
+  { label: STATUS_META.financing.label, count: statusCounts.value.financing, color: STATUS_META.financing.color },
+  { label: STATUS_META.inspection.label, count: statusCounts.value.inspection, color: STATUS_META.inspection.color },
+  { label: STATUS_META.sold.label, count: statusCounts.value.sold, color: STATUS_META.sold.color },
+  { label: STATUS_META.observation.label, count: statusCounts.value.observation, color: STATUS_META.observation.color },
+  { label: STATUS_META.available.label, count: statusCounts.value.available, color: STATUS_META.available.color }
 ]));
 
-const donutStyle = computed(() => {
-  if (totalUnits.value === 0) {
-    return { background: 'conic-gradient(#e2e8f0 0deg 360deg)' };
+const viewportLegendSegments = computed(() => ([
+  { label: STATUS_META.delivered.label, color: STATUS_META.delivered.color, outline: false },
+  { label: STATUS_META.financing.label, color: STATUS_META.financing.color, outline: false },
+  { label: STATUS_META.inspection.label, color: STATUS_META.inspection.color, outline: false },
+  { label: STATUS_META.sold.label, color: STATUS_META.sold.color, outline: false },
+  { label: STATUS_META.observation.label, color: STATUS_META.observation.color, outline: false },
+  { label: STATUS_META.available.label, color: '#f8fafc', outline: true }
+]));
+
+const deliveryChartData = computed(() => ({
+  labels: ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'],
+  datasets: [{
+    label: 'Entregadas',
+    data: monthlyDeliveries.value,
+    backgroundColor: '#3b82f6',
+    borderRadius: 6,
+    borderSkipped: false,
+    maxBarThickness: 20
+  }]
+}));
+
+const deliveryChartOptions = computed(() => ({
+  responsive: true,
+  maintainAspectRatio: false,
+  animation: { duration: 650, easing: 'easeOutQuart' as const },
+  plugins: {
+    legend: { display: false },
+    tooltip: { callbacks: { label: (ctx: any) => `${ctx.parsed.y} entregas` } }
+  },
+  scales: {
+    x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { size: 11 } } },
+    y: { beginAtZero: true, ticks: { precision: 0, color: '#94a3b8', font: { size: 11 } }, grid: { color: '#e2e8f0' } }
   }
+}));
 
-  let cursor = 0;
-  const gradients: string[] = [];
+const distributionChartData = computed(() => ({
+  labels: distributionSegments.value.map((segment) => segment.label),
+  datasets: [{
+    data: distributionSegments.value.map((segment) => segment.count),
+    backgroundColor: distributionSegments.value.map((segment) => segment.color),
+    borderColor: '#ffffff',
+    borderWidth: 2
+  }]
+}));
 
-  for (const segment of distributionSegments.value) {
-    const ratio = segment.count / totalUnits.value;
-    const angle = Math.round(ratio * 360);
-    const end = cursor + angle;
-    gradients.push(`${segment.color} ${cursor}deg ${end}deg`);
-    cursor = end;
+const distributionChartOptions = computed(() => ({
+  responsive: true,
+  maintainAspectRatio: false,
+  animation: { duration: 650, easing: 'easeOutQuart' as const },
+  cutout: '62%',
+  plugins: {
+    legend: { display: false },
+    tooltip: {
+      callbacks: {
+        label: (ctx: any) => `${ctx.label}: ${ctx.parsed}`
+      }
+    }
   }
-
-  if (cursor < 360) {
-    gradients.push(`#e2e8f0 ${cursor}deg 360deg`);
-  }
-
-  return { background: `conic-gradient(${gradients.join(', ')})` };
-});
+}));
 
 const recentActivities = computed(() => {
-  const statusMap: Record<DashboardStatus, { label: string; statusClass: string }> = {
-    delivered: { label: 'Entregada', statusClass: 'status-green' },
-    financing: { label: 'Con saldo', statusClass: 'status-blue' },
-    inspection: { label: 'Inspeccion', statusClass: 'status-cyan' },
-    sold: { label: 'Vendida', statusClass: 'status-indigo' },
-    observation: { label: 'Observacion', statusClass: 'status-red' },
-    available: { label: 'Disponible', statusClass: 'status-blue' }
-  };
-
   return [...effectiveUnits.value]
     .filter((unit) => unit.status !== 'available')
     .slice(0, 8)
@@ -461,8 +545,8 @@ const recentActivities = computed(() => {
       unitId: unit.unitId,
       unit: unit.displayName,
       building: unit.buildingName,
-      status: statusMap[unit.status].label,
-      statusClass: statusMap[unit.status].statusClass
+      status: STATUS_META[unit.status].label,
+      statusClass: STATUS_META[unit.status].statusClass
     }));
 });
 
@@ -545,6 +629,15 @@ watch(projectId, (newId) => {
 .btn-primary-custom:hover {
   background: #2563eb;
   color: white;
+}
+
+.year-select {
+  min-width: 92px;
+  border-radius: 999px;
+  border-color: #dbeafe;
+  color: #1d4ed8;
+  background-color: #eff6ff;
+  font-weight: 700;
 }
 
 .stat-card-v2 {
@@ -644,6 +737,18 @@ watch(projectId, (newId) => {
 }
 
 .dot { width: 8px; height: 8px; border-radius: 50%; }
+.dot-outline { border: 1px solid #94a3b8; }
+
+.legend-help-btn {
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 4px 10px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+}
 
 .building-progress-list {
   max-height: 420px;
@@ -656,6 +761,17 @@ watch(projectId, (newId) => {
 
 .donut-layout {
   gap: 12px;
+}
+
+.chart-panel {
+  position: relative;
+  width: 100%;
+  height: 220px;
+}
+
+.chart-panel-donut {
+  max-width: 220px;
+  height: 220px;
 }
 
 .donut-conic {
@@ -720,6 +836,7 @@ watch(projectId, (newId) => {
 .status-cyan { background: #ecfeff; color: #06b6d4; border: 1px solid #cffafe; }
 .status-blue { background: #eff6ff; color: #3b82f6; border: 1px solid #dbeafe; }
 .status-red { background: #fef2f2; color: #ef4444; border: 1px solid #fee2e2; }
+.status-slate { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
 
 .building-progress-list::-webkit-scrollbar,
 .activity-table-wrapper::-webkit-scrollbar {

@@ -8,6 +8,10 @@ const router = useRouter();
 const route = useRoute();
 const isAuthenticated = computed(() => appStore.isAuthenticated);
 const currentUser = computed(() => appStore.currentUser);
+const showGlobalLoader = computed(() => {
+  if (route.path === '/login') return false;
+  return appStore.networkBusyCount > 0 || appStore.isProjectContextLoading;
+});
 
 const handleLogout = () => {
   logout();
@@ -32,6 +36,13 @@ const openProfile = () => {
 
 <template>
   <div class="app-layout d-flex">
+    <div v-if="showGlobalLoader" class="app-loader-overlay">
+      <div class="app-loader-card">
+        <div class="app-loader-spinner"></div>
+        <div class="app-loader-text">Cargando información...</div>
+      </div>
+    </div>
+
     <!-- Mobile Menu Button -->
     <button v-if="isAuthenticated && route.path !== '/login'" class="mobile-menu-toggle d-md-none" @click="toggleSidebar" aria-label="Toggle Menu">
       <i class="bi" :class="isSidebarOpen ? 'bi-x-lg' : 'bi-list'"></i>
@@ -249,5 +260,47 @@ body {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+.app-loader-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  background: rgba(248, 250, 252, 0.8);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-loader-card {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.15);
+}
+
+.app-loader-spinner {
+  width: 22px;
+  height: 22px;
+  border: 3px solid #cbd5e1;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: app-spin 0.8s linear infinite;
+}
+
+.app-loader-text {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #334155;
+}
+
+@keyframes app-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 </style>

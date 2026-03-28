@@ -332,22 +332,26 @@ export class SceneManager {
                 return new THREE.Vector3(localX, floorY, localZ);
             };
 
+            const normalizeText = (value: unknown) => String(value ?? '').trim().toLowerCase();
+            const isUnitHighlighted = (unit: any) => {
+                if (!visualFilters) return true;
+                if (visualFilters.status && unit.status !== visualFilters.status) return false;
+                if (visualFilters.bank && normalizeText(unit.bank) !== normalizeText(visualFilters.bank)) return false;
+                if (visualFilters.hasDebt !== null && !!unit.hasDebt !== visualFilters.hasDebt) return false;
+                if (visualFilters.enInspeccion !== null && !!unit.enInspeccion !== visualFilters.enInspeccion) return false;
+                if (visualFilters.legal !== null && !!unit.legal !== visualFilters.legal) return false;
+                if (visualFilters.titulo !== null && !!unit.titulo !== visualFilters.titulo) return false;
+                if (visualFilters.descargadaDGII !== null && !!unit.descargadaDGII !== visualFilters.descargadaDGII) return false;
+                if (visualFilters.saldo !== null && !!unit.saldo !== visualFilters.saldo) return false;
+                return true;
+            };
+
             normalizedUnits.forEach(({ unit, floor, slot }: { unit: any; floor: number; slot: number }) => {
                 const colorHex = globalRulesEngine.resolveColor(unit);
                 const isSelectedUnit = selectedUnitId !== null && unit.id === selectedUnitId;
                 
                 // Multi-criteria filter check
-                let isHighlighted = true;
-                if (visualFilters) {
-                    if (visualFilters.status && unit.status !== visualFilters.status) isHighlighted = false;
-                    if (visualFilters.bank && unit.bank !== visualFilters.bank) isHighlighted = false;
-                    if (visualFilters.hasDebt !== null && !!unit.hasDebt !== visualFilters.hasDebt) isHighlighted = false;
-                    if (visualFilters.enInspeccion !== null && !!unit.enInspeccion !== visualFilters.enInspeccion) isHighlighted = false;
-                    if (visualFilters.legal !== null && !!unit.legal !== visualFilters.legal) isHighlighted = false;
-                    if (visualFilters.titulo !== null && !!unit.titulo !== visualFilters.titulo) isHighlighted = false;
-                    if (visualFilters.descargadaDGII !== null && !!unit.descargadaDGII !== visualFilters.descargadaDGII) isHighlighted = false;
-                    if (visualFilters.saldo !== null && !!unit.saldo !== visualFilters.saldo) isHighlighted = false;
-                }
+                const isHighlighted = isUnitHighlighted(unit);
                 
                 // 1. Unit Body
                 const uMat = new THREE.MeshStandardMaterial({ 
@@ -405,17 +409,7 @@ export class SceneManager {
             normalizedUnits.forEach(({ unit, floor, slot }: { unit: any; floor: number; slot: number }) => {
                 const isSelectedUnit = selectedUnitId !== null && unit.id === selectedUnitId;
                 // Determine highlight based on ALL criteria
-                let isHighlighted = true;
-                if (visualFilters) {
-                    if (visualFilters.status && unit.status !== visualFilters.status) isHighlighted = false;
-                    if (visualFilters.bank && unit.bank !== visualFilters.bank) isHighlighted = false;
-                    if (visualFilters.hasDebt !== null && !!unit.hasDebt !== visualFilters.hasDebt) isHighlighted = false;
-                    if (visualFilters.enInspeccion !== null && !!unit.enInspeccion !== visualFilters.enInspeccion) isHighlighted = false;
-                    if (visualFilters.legal !== null && !!unit.legal !== visualFilters.legal) isHighlighted = false;
-                    if (visualFilters.titulo !== null && !!unit.titulo !== visualFilters.titulo) isHighlighted = false;
-                    if (visualFilters.descargadaDGII !== null && !!unit.descargadaDGII !== visualFilters.descargadaDGII) isHighlighted = false;
-                    if (visualFilters.saldo !== null && !!unit.saldo !== visualFilters.saldo) isHighlighted = false;
-                }
+                const isHighlighted = isUnitHighlighted(unit);
 
                 const basePos = getUnitPosition(floor, slot);
                 const balconyMaterial = new THREE.MeshStandardMaterial({

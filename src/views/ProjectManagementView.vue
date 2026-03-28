@@ -72,7 +72,11 @@
 
       <!-- PROJECT LIST SECTION -->
       <div class="card border-0 shadow-sm rounded-4 bg-white overflow-hidden mb-4">
-        <div class="table-responsive">
+        <div v-if="isProjectsLoading" class="list-loader">
+          <div class="list-loader-spinner"></div>
+          <div class="list-loader-text">Cargando proyectos...</div>
+        </div>
+        <div v-else class="table-responsive">
           <table class="table table-hover align-middle custom-project-table mb-0">
             <thead class="bg-white border-bottom">
               <tr class="smaller-text text-slate-500 text-uppercase fw-bold ls-1">
@@ -309,6 +313,7 @@ watch([searchQuery, provinciaFilter, municipioFilter], () => {
 // Data from store
 const allProjects = computed(() => appStore.projects);
 const availableIds = computed(() => appStore.availableProjectIds);
+const isProjectsLoading = computed(() => appStore.isProjectsLoading && allProjects.value.length === 0);
 
 // Filtered List
 const filteredProjects = computed(() => {
@@ -588,6 +593,30 @@ const enterEditMode = (id: string) => {
   border-bottom: 1px solid #f1f5f9;
 }
 
+.list-loader {
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #64748b;
+}
+
+.list-loader-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid #cbd5e1;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.list-loader-text {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
 /* Pagination */
 .pagination-btn {
   width: 36px;
@@ -703,5 +732,10 @@ const enterEditMode = (id: string) => {
   .project-management-view {
     padding-top: 60px !important;
   }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 </style>

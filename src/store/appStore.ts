@@ -1,5 +1,6 @@
 import { reactive } from 'vue';
 import type { Building, Unit, UnitStatus, User, Project, DetailedUnit } from '../models/types';
+import * as XLSX from 'xlsx';
 
 type AuthResponse = {
     user: User;
@@ -19,6 +20,14 @@ let authInitializationPromise: Promise<void> | null = null;
 let projectsLoadPromise: Promise<Project[]> | null = null;
 let usersLoadPromise: Promise<User[]> | null = null;
 let availableProjectIdsLoadPromise: Promise<string[]> | null = null;
+
+const beginNetworkActivity = () => {
+    appStore.networkBusyCount += 1;
+};
+
+const endNetworkActivity = () => {
+    appStore.networkBusyCount = Math.max(0, appStore.networkBusyCount - 1);
+};
 
 const persistAuthSession = (session: AuthSession) => {
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
@@ -332,12 +341,103 @@ const normalizeDetailedUnitsResponse = (payload: unknown): DetailedUnit[] => {
         result?: DetailedUnit[];
     };
 
-    return candidate.apartments
+    const rawUnits = (candidate.apartments
         ?? candidate.detailedUnits
         ?? candidate.data
         ?? candidate.items
         ?? candidate.result
-        ?? [];
+        ?? []) as unknown[];
+
+    if (!Array.isArray(rawUnits)) return [];
+
+    const asBoolOrNull = (value: unknown): boolean | null => {
+        if (value === null || value === undefined || value === '') return null;
+        if (typeof value === 'boolean') return value;
+        if (typeof value === 'number') return value > 0;
+        if (typeof value === 'string') {
+            const normalized = value.trim().toLowerCase();
+            if (['si', 'sí', 's', 'yes', 'true', '1', 'entregado'].includes(normalized)) return true;
+            if (['no', 'n', 'false', '0'].includes(normalized)) return false;
+        }
+        return null;
+    };
+
+    const asNumberOrZero = (value: unknown) => {
+        if (typeof value === 'number' && Number.isFinite(value)) return value;
+        if (typeof value === 'string') {
+            const parsed = Number(value.replace(/,/g, '').trim());
+            if (Number.isFinite(parsed)) return parsed;
+        }
+        return 0;
+    };
+
+    const asNumberOrNull = (value: unknown): number | null => {
+        if (value === null || value === undefined || value === '') return null;
+        if (typeof value === 'number' && Number.isFinite(value)) return value;
+        if (typeof value === 'string') {
+            const parsed = Number(value.replace(/,/g, '').trim());
+            if (Number.isFinite(parsed)) return parsed;
+        }
+        return null;
+    };
+
+    return rawUnits.map((raw): DetailedUnit => {
+        const row = raw as Record<string, unknown>;
+        const get = (...keys: string[]) => {
+            for (const key of keys) {
+                if (row[key] !== undefined) return row[key];
+            }
+            return undefined;
+        };
+
+        const edificio = String(get('edificio', 'Edificio') ?? '');
+        const unidad = String(get('unidad', 'Unidad') ?? '');
+        const codUnidad = String(get('codUnidad', 'CodUnidad', 'codigoUnidad', 'CodigoUnidad') ?? '').trim()
+            || `${edificio}-${unidad}`.trim();
+
+        return {
+            id: Number(get('id', 'Id') ?? 0),
+            codUnidad,
+            edificio,
+            unidad,
+            metraje: asNumberOrZero(get('metraje', 'Metraje')),
+            estado: String(get('estado', 'Estado') ?? ''),
+            nombre: String(get('nombre', 'Nombre') ?? ''),
+            telefono: String(get('telefono', 'Telefono') ?? ''),
+            correo: String(get('correo', 'Correo') ?? ''),
+            cedula: String(get('cedula', 'Cedula') ?? ''),
+            precio: asNumberOrZero(get('precio', 'Precio')),
+            inicial: asNumberOrNull(get('inicial', 'Inicial')),
+            inicialDolar: asNumberOrNull(get('inicialDolar', 'InicialDolar', 'inicialUSD', 'InicialUSD')),
+            pagado: asNumberOrNull(get('pagado', 'Pagado')),
+            adeudado: asNumberOrNull(get('adeudado', 'Adeudado')),
+            fechaCompletaInicial: (get('fechaCompletaInicial', 'FechaCompletaInicial') ?? null) as string | null,
+            fechaInicioVaciados: (get('fechaInicioVaciados', 'FechaInicioVaciados') ?? null) as string | null,
+            fechaEntregaInspeccion: (get('fechaEntregaInspeccion', 'FechaEntregaInspeccion') ?? null) as string | null,
+            fechaLegal: (get('fechaLegal', 'FechaLegal') ?? null) as string | null,
+            fechaGobierno: (get('fechaGobierno', 'FechaGobierno') ?? null) as string | null,
+            fechaMicelaneos: (get('fechaMicelaneos', 'FechaMicelaneos') ?? null) as string | null,
+            fechaInspeccion1: (get('fechaInspeccion1', 'FechaInspeccion1') ?? null) as string | null,
+            fechaInspeccion2: (get('fechaInspeccion2', 'FechaInspeccion2') ?? null) as string | null,
+            fechaFormaPago: (get('fechaFormaPago', 'FechaFormaPago') ?? null) as string | null,
+            iniciadoVaciados: asBoolOrNull(get('iniciadoVaciados', 'IniciadoVaciados')),
+            enInspeccion: asBoolOrNull(get('enInspeccion', 'EnInspeccion')),
+            inspeccion1: asBoolOrNull(get('inspeccion1', 'Inspeccion1')),
+            inspeccion2: asBoolOrNull(get('inspeccion2', 'Inspeccion2')),
+            legal: asBoolOrNull(get('legal', 'Legal')),
+            gobierno: asBoolOrNull(get('gobierno', 'Gobierno')),
+            micelaneos: asBoolOrNull(get('micelaneos', 'Micelaneos')),
+            titulo: asBoolOrNull(get('titulo', 'Titulo')),
+            responsableLegal: String(get('responsableLegal', 'ResponsableLegal') ?? ''),
+            responsableGobierno: String(get('responsableGobierno', 'ResponsableGobierno') ?? ''),
+            responsableMicelaneos: String(get('responsableMicelaneos', 'ResponsableMicelaneos') ?? ''),
+            formaPago: String(get('formaPago', 'FormaPago') ?? ''),
+            banco: String(get('banco', 'Banco') ?? '').trim(),
+            saldo: asBoolOrNull(get('saldo', 'Saldo')),
+            entregada: asBoolOrNull(get('entregada', 'Entregada')),
+            descargadaDGII: asBoolOrNull(get('descargadaDGII', 'DescargadaDGII'))
+        };
+    });
 };
 
 const getApartmentCandidates = (building: Building, unit: Unit) => {
@@ -360,24 +460,384 @@ const getApartmentCandidates = (building: Building, unit: Unit) => {
     ].filter((value): value is string => Boolean(value)));
 };
 
+const normalizeLookupKey = (value: unknown) => String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/_/g, '-');
+
+const normalizeDetailedUnitStatus = (apartment: DetailedUnit): UnitStatus => {
+    const estado = String(apartment.estado ?? '')
+        .trim()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+    const formaPago = String(apartment.formaPago ?? '')
+        .trim()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+
+    if (apartment.entregada === true || estado.includes('entregad')) return 'delivered';
+    if (apartment.enInspeccion === true || estado.includes('inspeccion')) return 'inspection';
+    if (formaPago.includes('financi') || estado.includes('financ')) return 'financing';
+    if (estado.includes('vend')) return 'sold';
+    if (estado.includes('reserv')) return 'reserved';
+    if (estado.includes('observ')) return 'observation';
+    if (estado.includes('manten')) return 'maintenance';
+    return 'available';
+};
+
+const applyDetailedUnitToLayoutUnit = (unit: Unit, apartment: DetailedUnit) => {
+    unit.codUnidad = apartment.codUnidad || unit.codUnidad;
+    unit.detailedUnitCode = apartment.codUnidad || unit.detailedUnitCode;
+    unit.externalUnitCode = apartment.codUnidad || unit.externalUnitCode;
+    unit.status = normalizeDetailedUnitStatus(apartment);
+    unit.bank = apartment.banco?.trim() || undefined;
+    unit.enInspeccion = apartment.enInspeccion ?? undefined;
+    unit.legal = apartment.legal ?? undefined;
+    unit.titulo = apartment.titulo ?? undefined;
+    unit.descargadaDGII = apartment.descargadaDGII ?? undefined;
+    unit.saldo = apartment.saldo ?? undefined;
+    unit.balance = apartment.adeudado ?? unit.balance;
+    unit.price = apartment.precio ?? unit.price;
+    unit.hasDebt = typeof apartment.adeudado === 'number' ? apartment.adeudado > 0 : undefined;
+    unit.paid = typeof apartment.adeudado === 'number'
+        ? apartment.adeudado <= 0
+        : (apartment.saldo ?? unit.paid);
+    unit.deliveryDate = apartment.fechaEntregaInspeccion ?? unit.deliveryDate;
+};
+
 const linkProjectApartmentsToLayout = (projectId: string) => {
     const projectBuildings = appStore.buildings.filter(building => building.projectId === projectId);
+    const apartments = appStore.detailedUnits;
+
+    const apartmentByCod = new Map<string, DetailedUnit>();
+    const apartmentByBuildingUnit = new Map<string, DetailedUnit>();
+
+    apartments.forEach((apartment) => {
+        const codKey = normalizeLookupKey(apartment.codUnidad);
+        if (codKey) apartmentByCod.set(codKey, apartment);
+
+        const byBuildingUnit = normalizeLookupKey(`${apartment.edificio}-${apartment.unidad}`);
+        if (byBuildingUnit) apartmentByBuildingUnit.set(byBuildingUnit, apartment);
+    });
 
     projectBuildings.forEach(building => {
         building.units.forEach(unit => {
             const candidates = getApartmentCandidates(building, unit);
-            const matchedApartment = appStore.detailedUnits.find(apartment => {
-                const apartmentKey = `${apartment.edificio}-${apartment.unidad}`;
-                return candidates.has(apartment.codUnidad)
-                    || candidates.has(apartmentKey)
-                    || candidates.has(apartment.codUnidad?.trim())
-                    || apartment.codUnidad.includes(building.projectId)
-                    || apartmentKey === unit.name;
-            });
+            const normalizedCandidates = Array.from(candidates)
+                .map(candidate => normalizeLookupKey(candidate))
+                .filter(Boolean);
+
+            let matchedApartment: DetailedUnit | undefined;
+            for (const key of normalizedCandidates) {
+                matchedApartment = apartmentByCod.get(key) ?? apartmentByBuildingUnit.get(key);
+                if (matchedApartment) break;
+            }
 
             unit.detailedUnitId = matchedApartment ? matchedApartment.id : null;
+            if (matchedApartment) {
+                applyDetailedUnitToLayoutUnit(unit, matchedApartment);
+            }
         });
     });
+};
+
+type ExcelApartmentRow = {
+    codUnidad: string;
+    edificio: string;
+    unidad: string;
+    floor: number;
+    status: UnitStatus;
+    paid: boolean;
+    price?: number;
+    balance?: number;
+    hasDebt?: boolean;
+    bank?: string;
+    enInspeccion?: boolean;
+    legal?: boolean;
+    titulo?: boolean;
+    descargadaDGII?: boolean;
+    saldo?: boolean;
+};
+
+const normalizeHeader = (value: unknown) => String(value ?? '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+
+const getHeaderIndex = (headers: unknown[], aliases: string[]) => {
+    const normalizedAliases = aliases.map(normalizeHeader);
+    return headers.findIndex((header) => normalizedAliases.includes(normalizeHeader(header)));
+};
+
+const getHeaderIndexes = (headers: unknown[], aliases: string[]) => {
+    const normalizedAliases = aliases.map(normalizeHeader);
+    return headers
+        .map((header, index) => ({ header: normalizeHeader(header), index }))
+        .filter(({ header }) => normalizedAliases.includes(header))
+        .map(({ index }) => index);
+};
+
+const toOptionalNumber = (value: unknown): number | undefined => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+        const cleaned = value.replace(/,/g, '').trim();
+        if (!cleaned) return undefined;
+        const parsed = Number(cleaned);
+        if (Number.isFinite(parsed)) return parsed;
+    }
+    return undefined;
+};
+
+const toBooleanFromExcel = (value: unknown): boolean | undefined => {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value > 0;
+    if (typeof value !== 'string') return undefined;
+
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return undefined;
+    if (['si', 'sí', 's', 'yes', 'true', '1', 'entregado'].includes(normalized)) return true;
+    if (['no', 'n', 'false', '0'].includes(normalized)) return false;
+    return undefined;
+};
+
+const toUnitStatus = (rawStatus: string, financed: boolean, delivered: boolean, inspection: boolean): UnitStatus => {
+    const normalized = rawStatus
+        .trim()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+
+    if (delivered) return 'delivered';
+    if (inspection) return 'inspection';
+    if (financed) return 'financing';
+    if (normalized.includes('vend')) return 'sold';
+    if (normalized.includes('reserv')) return 'reserved';
+    if (normalized.includes('observ')) return 'observation';
+    if (normalized.includes('manten')) return 'maintenance';
+    if (normalized.includes('disponible')) return 'available';
+    return 'available';
+};
+
+const inferFloorFromUnit = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return 1;
+
+    const direct = Number(trimmed);
+    if (Number.isFinite(direct) && direct >= 100) {
+        return Math.max(1, Math.floor(direct / 100));
+    }
+
+    const lastNumericToken = trimmed.match(/(\d{3,4})(?!.*\d)/);
+    if (lastNumericToken) {
+        const parsed = Number(lastNumericToken[1]);
+        if (Number.isFinite(parsed) && parsed >= 100) {
+            return Math.max(1, Math.floor(parsed / 100));
+        }
+    }
+
+    return 1;
+};
+
+const inferLayoutDimensions = (unitsPerFloor: number) => {
+    const safeUnitsPerFloor = Math.min(MAX_LAYOUT_COLS * MAX_LAYOUT_ROWS, Math.max(1, unitsPerFloor));
+    const cols = Math.min(MAX_LAYOUT_COLS, Math.max(1, Math.ceil(Math.sqrt(safeUnitsPerFloor))));
+    const rows = Math.min(MAX_LAYOUT_ROWS, Math.max(1, Math.ceil(safeUnitsPerFloor / cols)));
+    return { cols, rows };
+};
+
+const parseExcelSheetRows = (rows: unknown[][]): ExcelApartmentRow[] => {
+    if (rows.length < 2) return [];
+
+    const headers = rows[0] ?? [];
+    const codIdx = getHeaderIndex(headers, ['cod. unidad', 'cod unidad', 'codigo unidad', 'unidad ii', 'unidad']);
+    const edificioIdx = getHeaderIndex(headers, ['edificio', 'bloque', 'torre']);
+    const unidadCandidates = getHeaderIndexes(headers, ['unidad', 'apartamento', 'apto', 'numero unidad', 'no unidad']);
+    const unidadIdx = (() => {
+        if (unidadCandidates.length === 0) return -1;
+        const prioritized = unidadCandidates.filter((index) => index !== codIdx);
+        const candidates = prioritized.length > 0 ? prioritized : unidadCandidates;
+        if (candidates.length === 1) return candidates[0];
+
+        let bestIndex = candidates[0];
+        let bestScore = -1;
+        candidates.forEach((candidateIndex) => {
+            let numericLikeCount = 0;
+            let inspected = 0;
+            for (let rowIndex = 1; rowIndex < Math.min(rows.length, 30); rowIndex++) {
+                const cell = rows[rowIndex]?.[candidateIndex];
+                if (cell == null || cell === '') continue;
+                inspected += 1;
+                const normalized = String(cell).trim();
+                if (/^\d+$/.test(normalized)) numericLikeCount += 1;
+            }
+            const score = inspected === 0 ? 0 : numericLikeCount / inspected;
+            const preferredByPosition = edificioIdx >= 0 && candidateIndex > edificioIdx ? 0.1 : 0;
+            const totalScore = score + preferredByPosition;
+            if (totalScore > bestScore) {
+                bestScore = totalScore;
+                bestIndex = candidateIndex;
+            }
+        });
+        return bestIndex;
+    })();
+    const estadoIdx = getHeaderIndex(headers, ['estado']);
+    const precioIdx = getHeaderIndex(headers, ['precio']);
+    const adeudadoIdx = getHeaderIndex(headers, ['adeudado', 'balance']);
+    const pagadoIdx = getHeaderIndex(headers, ['pagado']);
+    const bancoIdx = getHeaderIndex(headers, ['banco']);
+    const inspeccionIdx = getHeaderIndex(headers, ['en inspeccion']);
+    const legalIdx = getHeaderIndex(headers, ['legal']);
+    const tituloIdx = getHeaderIndex(headers, ['titulo']);
+    const dgiiIdx = getHeaderIndex(headers, ['descargada dgii']);
+    const saldoIdx = getHeaderIndex(headers, ['saldo']);
+    const entregadaIdx = getHeaderIndex(headers, ['entregada']);
+    const formaPagoIdx = getHeaderIndex(headers, ['forma de pago']);
+
+    if (edificioIdx < 0 || unidadIdx < 0) return [];
+
+    const parsed: ExcelApartmentRow[] = [];
+    for (let i = 1; i < rows.length; i++) {
+        const row = rows[i] ?? [];
+        const edificio = String(row[edificioIdx] ?? '').trim();
+        const unidad = String(row[unidadIdx] ?? '').trim();
+        if (!edificio || !unidad) continue;
+
+        const codFromRow = codIdx >= 0 ? String(row[codIdx] ?? '').trim() : '';
+        const codUnidad = codFromRow || `${edificio}-${unidad}`;
+        const enInspeccion = inspeccionIdx >= 0 ? toBooleanFromExcel(row[inspeccionIdx]) : undefined;
+        const entregada = entregadaIdx >= 0 ? toBooleanFromExcel(row[entregadaIdx]) : undefined;
+        const formaPago = formaPagoIdx >= 0 ? String(row[formaPagoIdx] ?? '').toLowerCase() : '';
+        const financed = formaPago.includes('financi');
+        const status = toUnitStatus(
+            estadoIdx >= 0 ? String(row[estadoIdx] ?? '') : '',
+            financed,
+            Boolean(entregada),
+            Boolean(enInspeccion)
+        );
+        const price = precioIdx >= 0 ? toOptionalNumber(row[precioIdx]) : undefined;
+        const balance = adeudadoIdx >= 0 ? toOptionalNumber(row[adeudadoIdx]) : undefined;
+        const paidAmount = pagadoIdx >= 0 ? toOptionalNumber(row[pagadoIdx]) : undefined;
+        const paid = balance !== undefined ? balance <= 0 : (paidAmount ?? 0) > 0;
+
+        parsed.push({
+            codUnidad,
+            edificio,
+            unidad,
+            floor: inferFloorFromUnit(unidad),
+            status,
+            paid,
+            price,
+            balance,
+            hasDebt: typeof balance === 'number' ? balance > 0 : undefined,
+            bank: bancoIdx >= 0 ? String(row[bancoIdx] ?? '').trim() || undefined : undefined,
+            enInspeccion,
+            legal: legalIdx >= 0 ? toBooleanFromExcel(row[legalIdx]) : undefined,
+            titulo: tituloIdx >= 0 ? toBooleanFromExcel(row[tituloIdx]) : undefined,
+            descargadaDGII: dgiiIdx >= 0 ? toBooleanFromExcel(row[dgiiIdx]) : undefined,
+            saldo: saldoIdx >= 0 ? toBooleanFromExcel(row[saldoIdx]) : undefined
+        });
+    }
+
+    return parsed;
+};
+
+const buildLayoutFromExcelRows = (projectId: string, rows: ExcelApartmentRow[], detailedUnits: DetailedUnit[]) => {
+    const rowsByBuilding = new Map<string, ExcelApartmentRow[]>();
+    rows.forEach((row) => {
+        const key = row.edificio.trim();
+        const list = rowsByBuilding.get(key) ?? [];
+        list.push(row);
+        rowsByBuilding.set(key, list);
+    });
+
+    const detailedByCode = new Map(detailedUnits.map((apartment) => [apartment.codUnidad.trim().toLowerCase(), apartment.id]));
+    const detailedByBuildingUnit = new Map(
+        detailedUnits.map((apartment) => [`${apartment.edificio}-${apartment.unidad}`.trim().toLowerCase(), apartment.id])
+    );
+
+    const buildingEntries = Array.from(rowsByBuilding.entries()).sort(([a], [b]) => a.localeCompare(b, 'es', { numeric: true }));
+    const perRow = Math.max(1, Math.ceil(Math.sqrt(buildingEntries.length)));
+    const spacing = 8;
+
+    const buildings: Building[] = buildingEntries.map(([buildingName, buildingRows], index) => {
+        const buildingId = `bld_${generateId()}`;
+        const sortedRows = [...buildingRows].sort((a, b) => {
+            if (a.floor !== b.floor) return a.floor - b.floor;
+            return a.unidad.localeCompare(b.unidad, 'es', { numeric: true });
+        });
+
+        const unitsByFloor = new Map<number, ExcelApartmentRow[]>();
+        sortedRows.forEach((row) => {
+            const floorRows = unitsByFloor.get(row.floor) ?? [];
+            floorRows.push(row);
+            unitsByFloor.set(row.floor, floorRows);
+        });
+
+        const maxUnitsPerFloor = Math.max(1, ...Array.from(unitsByFloor.values()).map((floorRows) => floorRows.length));
+        const { cols, rows: layoutRows } = inferLayoutDimensions(maxUnitsPerFloor);
+
+        const units: Unit[] = [];
+        const floorOrder = Array.from(unitsByFloor.keys()).sort((a, b) => a - b);
+        floorOrder.forEach((floor) => {
+            const floorRows = unitsByFloor.get(floor) ?? [];
+            floorRows.forEach((row, slotIndex) => {
+                const byCode = detailedByCode.get(row.codUnidad.trim().toLowerCase()) ?? null;
+                const byBuildingUnit = detailedByBuildingUnit.get(`${row.edificio}-${row.unidad}`.trim().toLowerCase()) ?? null;
+                const detailedUnitId = byCode ?? byBuildingUnit ?? null;
+                units.push({
+                    id: `unt_${generateId()}`,
+                    detailedUnitId,
+                    buildingId,
+                    name: row.unidad,
+                    floor,
+                    slot: slotIndex,
+                    codUnidad: row.codUnidad,
+                    detailedUnitCode: row.codUnidad,
+                    externalUnitCode: row.codUnidad,
+                    status: row.status,
+                    paid: row.paid,
+                    price: row.price,
+                    balance: row.balance,
+                    hasDebt: row.hasDebt,
+                    bank: row.bank,
+                    enInspeccion: row.enInspeccion,
+                    legal: row.legal,
+                    titulo: row.titulo,
+                    descargadaDGII: row.descargadaDGII,
+                    saldo: row.saldo
+                });
+            });
+        });
+
+        const rowIndex = Math.floor(index / perRow);
+        const colIndex = index % perRow;
+
+        return {
+            id: buildingId,
+            projectId,
+            name: buildingName,
+            position: {
+                x: (colIndex - ((perRow - 1) / 2)) * spacing,
+                z: (rowIndex - ((Math.ceil(buildingEntries.length / perRow) - 1) / 2)) * spacing
+            },
+            dimensions: {
+                width: 3.5,
+                depth: 3.5,
+                height: Math.max(8, floorOrder.length * 2.8)
+            },
+            rotationY: 0,
+            layoutCols: cols,
+            layoutRows,
+            units
+        };
+    });
+
+    return buildings;
 };
 
 interface AppState {
@@ -398,6 +858,10 @@ interface AppState {
     gridSize: number;
     currentProjectLayoutStatus: 'idle' | 'loading' | 'saving' | 'ready' | 'missing' | 'error';
     currentProjectLayoutMessage: string;
+    isProjectsLoading: boolean;
+    isApartmentsLoading: boolean;
+    networkBusyCount: number;
+    isProjectContextLoading: boolean;
     visualFilters: {
         status: UnitStatus | null;
         bank: string | null;
@@ -428,6 +892,10 @@ export const appStore = reactive<AppState>({
     gridSize: 300,
     currentProjectLayoutStatus: 'idle',
     currentProjectLayoutMessage: '',
+    isProjectsLoading: false,
+    isApartmentsLoading: false,
+    networkBusyCount: 0,
+    isProjectContextLoading: false,
     visualFilters: {
         status: null,
         bank: null,
@@ -450,11 +918,19 @@ export const selectProject = (id: string | null) => {
         clearProjectApartmentState();
         appStore.currentProjectLayoutStatus = 'loading';
         appStore.currentProjectLayoutMessage = '';
-        void loadProjectLayout(id);
-        void loadProjectApartments(id);
+        appStore.isProjectContextLoading = true;
+        void Promise.allSettled([
+            loadProjectLayout(id),
+            loadProjectApartments(id)
+        ]).finally(() => {
+            if (appStore.currentProjectId === id) {
+                appStore.isProjectContextLoading = false;
+            }
+        });
     } else {
         appStore.currentProjectLayoutStatus = 'idle';
         appStore.currentProjectLayoutMessage = '';
+        appStore.isProjectContextLoading = false;
     }
 };
 
@@ -893,6 +1369,7 @@ export const ensureAuthInitialized = async () => {
     }
 
     authInitializationPromise = (async () => {
+        beginNetworkActivity();
         const session = readAuthSession();
         if (!session) {
             return;
@@ -932,6 +1409,10 @@ export const ensureAuthInitialized = async () => {
         ]);
     })();
 
+    authInitializationPromise = authInitializationPromise.finally(() => {
+        endNetworkActivity();
+    });
+
     return authInitializationPromise;
 };
 
@@ -955,6 +1436,7 @@ export const loadUsers = async () => {
     }
 
     usersLoadPromise = (async () => {
+    beginNetworkActivity();
     try {
         const response = await fetch(`${API_BASE_URL}/Users`, {
             headers: {
@@ -976,6 +1458,7 @@ export const loadUsers = async () => {
         return appStore.users;
     } finally {
         usersLoadPromise = null;
+        endNetworkActivity();
     }
     })();
 
@@ -989,6 +1472,8 @@ export const loadProjects = async () => {
     }
 
     projectsLoadPromise = (async () => {
+    beginNetworkActivity();
+    appStore.isProjectsLoading = true;
     try {
         const response = await fetch(`${API_BASE_URL}/Projects`, {
             headers: {
@@ -1008,6 +1493,8 @@ export const loadProjects = async () => {
         return appStore.projects;
     } finally {
         projectsLoadPromise = null;
+        appStore.isProjectsLoading = false;
+        endNetworkActivity();
     }
     })();
 
@@ -1015,6 +1502,7 @@ export const loadProjects = async () => {
 };
 
 export const loadProjectLayout = async (projectId: string) => {
+    beginNetworkActivity();
     try {
         const response = await fetch(`${API_BASE_URL}/Projects/${projectId}/layout`, {
             headers: {
@@ -1064,10 +1552,14 @@ export const loadProjectLayout = async (projectId: string) => {
             appStore.currentProjectLayoutMessage = 'No se pudo cargar el layout del proyecto.';
         }
         return null;
+    } finally {
+        endNetworkActivity();
     }
 };
 
 export const loadProjectApartments = async (projectId: string) => {
+    beginNetworkActivity();
+    appStore.isApartmentsLoading = true;
     try {
         const response = await fetch(`${API_BASE_URL}/Projects/${projectId}/apartments`, {
             headers: {
@@ -1091,6 +1583,104 @@ export const loadProjectApartments = async (projectId: string) => {
         return apartments;
     } catch (_error) {
         return appStore.detailedUnits;
+    } finally {
+        appStore.isApartmentsLoading = false;
+        endNetworkActivity();
+    }
+};
+
+export const generateProjectLayoutFromExcel = async (file: File) => {
+    const projectId = appStore.currentProjectId;
+    if (!projectId) {
+        appStore.currentProjectLayoutStatus = 'error';
+        appStore.currentProjectLayoutMessage = 'Debes seleccionar un proyecto antes de generar el layout desde Excel.';
+        return null;
+    }
+
+    try {
+        const fileBuffer = await file.arrayBuffer();
+        const workbook = XLSX.read(fileBuffer, { type: 'array' });
+        const targetSheetName = workbook.SheetNames.find((sheetName) => sheetName.trim().toLowerCase() === projectId.trim().toLowerCase());
+
+        if (!targetSheetName) {
+            appStore.currentProjectLayoutStatus = 'error';
+            appStore.currentProjectLayoutMessage = `No se encontró la hoja "${projectId}" dentro del archivo Excel.`;
+            return null;
+        }
+
+        const sheet = workbook.Sheets[targetSheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, blankrows: false }) as unknown[][];
+        const parsedRows = parseExcelSheetRows(rows);
+
+        if (parsedRows.length === 0) {
+            appStore.currentProjectLayoutStatus = 'error';
+            appStore.currentProjectLayoutMessage = 'La hoja no contiene filas válidas con columnas de Edificio y Unidad.';
+            return null;
+        }
+
+        const generatedBuildings = buildLayoutFromExcelRows(projectId, parsedRows, appStore.detailedUnits);
+        syncProjectLayoutState(projectId, generatedBuildings);
+        appStore.selectedBuildingId = null;
+        appStore.selectedUnitId = null;
+        appStore.currentProjectLayoutStatus = 'ready';
+        appStore.currentProjectLayoutMessage = `Layout generado desde Excel: ${generatedBuildings.length} edificios y ${parsedRows.length} unidades.`;
+
+        return {
+            sheet: targetSheetName,
+            buildings: generatedBuildings.length,
+            units: parsedRows.length
+        };
+    } catch (_error) {
+        appStore.currentProjectLayoutStatus = 'error';
+        appStore.currentProjectLayoutMessage = 'No se pudo procesar el archivo Excel.';
+        return null;
+    }
+};
+
+export const previewProjectLayoutFromExcel = async (file: File) => {
+    const projectId = appStore.currentProjectId;
+    if (!projectId) {
+        appStore.currentProjectLayoutStatus = 'error';
+        appStore.currentProjectLayoutMessage = 'Debes seleccionar un proyecto antes de generar el layout desde Excel.';
+        return null;
+    }
+
+    try {
+        const fileBuffer = await file.arrayBuffer();
+        const workbook = XLSX.read(fileBuffer, { type: 'array' });
+        const targetSheetName = workbook.SheetNames.find((sheetName) => sheetName.trim().toLowerCase() === projectId.trim().toLowerCase());
+
+        if (!targetSheetName) {
+            appStore.currentProjectLayoutStatus = 'error';
+            appStore.currentProjectLayoutMessage = `No se encontró la hoja "${projectId}" dentro del archivo Excel.`;
+            return null;
+        }
+
+        const sheet = workbook.Sheets[targetSheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, blankrows: false }) as unknown[][];
+        const parsedRows = parseExcelSheetRows(rows);
+
+        if (parsedRows.length === 0) {
+            appStore.currentProjectLayoutStatus = 'error';
+            appStore.currentProjectLayoutMessage = 'La hoja no contiene filas válidas con columnas de Edificio y Unidad.';
+            return null;
+        }
+
+        const generatedBuildings = buildLayoutFromExcelRows(projectId, parsedRows, appStore.detailedUnits);
+        const projectBuildings = appStore.buildings.filter((building) => building.projectId === projectId);
+        const currentUnits = projectBuildings.reduce((acc, building) => acc + building.units.length, 0);
+
+        return {
+            sheet: targetSheetName,
+            buildings: generatedBuildings.length,
+            units: parsedRows.length,
+            currentBuildings: projectBuildings.length,
+            currentUnits
+        };
+    } catch (_error) {
+        appStore.currentProjectLayoutStatus = 'error';
+        appStore.currentProjectLayoutMessage = 'No se pudo procesar el archivo Excel.';
+        return null;
     }
 };
 
@@ -1151,6 +1741,7 @@ export const loadAvailableProjectIds = async () => {
     }
 
     availableProjectIdsLoadPromise = (async () => {
+    beginNetworkActivity();
     try {
         const response = await fetch(`${API_BASE_URL}/Apartamentos/sheets`, {
             headers: {
@@ -1174,6 +1765,7 @@ export const loadAvailableProjectIds = async () => {
         return appStore.availableProjectIds;
     } finally {
         availableProjectIdsLoadPromise = null;
+        endNetworkActivity();
     }
     })();
 

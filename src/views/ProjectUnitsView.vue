@@ -100,7 +100,11 @@
 
       <!-- UNITS TABLE -->
       <div class="card border-0 shadow-sm rounded-4 bg-white overflow-hidden">
-        <div class="table-responsive">
+        <div v-if="isUnitsLoading" class="list-loader">
+          <div class="list-loader-spinner"></div>
+          <div class="list-loader-text">Cargando apartamentos...</div>
+        </div>
+        <div v-else class="table-responsive">
           <table class="table table-hover align-middle mb-0 units-table">
             <thead class="bg-white border-bottom">
               <tr class="smaller-text text-slate-500 text-uppercase fw-bold ls-1">
@@ -624,6 +628,12 @@ onMounted(() => {
   window.scrollTo(0, 0);
 });
 
+const isUnitsLoading = computed(() => {
+  return appStore.isApartmentsLoading
+    && appStore.currentProjectId === projectId
+    && appStore.detailedUnits.length === 0;
+});
+
 watch(() => route.params.id, (newId) => {
   if (typeof newId === 'string' && newId) {
     selectProject(newId);
@@ -702,6 +712,30 @@ watch(() => route.params.id, (newId) => {
 .units-table tbody td {
   padding: 16px 8px;
   border-bottom: 1px solid #f1f5f9;
+}
+
+.list-loader {
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #64748b;
+}
+
+.list-loader-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid #cbd5e1;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.list-loader-text {
+  font-weight: 700;
+  font-size: 0.9rem;
 }
 
 .process-dot {
@@ -926,5 +960,10 @@ watch(() => route.params.id, (newId) => {
   .project-units-view {
     padding-top: 60px !important;
   }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 </style>

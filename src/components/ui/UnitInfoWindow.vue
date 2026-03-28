@@ -38,178 +38,118 @@
         <div class="info-grid">
           <!-- Linked Data Section (only if available) -->
           <div v-if="linkedDetailedUnit" class="linked-data-wrapper animate__animated animate__fadeIn">
-            <div class="d-flex justify-content-between mb-1">
-              <span class="info-label">Cliente</span>
-              <span class="info-value text-primary fw-bold text-end">{{ linkedDetailedUnit.nombre || 'N/D' }}</span>
+            <div class="info-item">
+              <span class="info-label">Codigo Unidad</span>
+              <span class="info-value text-truncate">{{ linkedDetailedUnit.codUnidad || 'N/D' }}</span>
             </div>
-            <div class="d-flex justify-content-between mb-1">
-              <span class="info-label">Cédula</span>
+            <div class="info-item">
+              <span class="info-label">Estado Real</span>
+              <span class="info-value text-primary fw-bold">{{ linkedDetailedUnit.estado || 'N/D' }}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Cliente</span>
+              <span class="info-value text-end">{{ linkedDetailedUnit.nombre || 'N/D' }}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Cedula</span>
               <span class="info-value text-end">{{ linkedDetailedUnit.cedula || 'N/D' }}</span>
             </div>
-            <div class="d-flex justify-content-between mb-2">
+            <div class="info-item">
+              <span class="info-label">Telefono</span>
+              <span class="info-value text-end">{{ linkedDetailedUnit.telefono || '-' }}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Correo</span>
+              <span class="info-value text-truncate">{{ linkedDetailedUnit.correo || '-' }}</span>
+            </div>
+            <div class="info-item">
               <span class="info-label">Metraje</span>
-              <span class="info-value text-end">{{ linkedDetailedUnit.metraje }} m²</span>
+              <span class="info-value">{{ linkedDetailedUnit.metraje || 0 }} m2</span>
             </div>
-            
-            <div class="contact-pill mb-3">
-              <div class="smaller-text d-flex align-items-center gap-2 mb-1">
-                <i class="bi bi-telephone text-primary"></i>
-                <span class="fw-medium">{{ linkedDetailedUnit.telefono || '-' }}</span>
-              </div>
-              <div class="smaller-text d-flex align-items-center gap-2">
-                <i class="bi bi-envelope text-primary"></i>
-                <span class="fw-medium text-truncate">{{ linkedDetailedUnit.correo || '-' }}</span>
-              </div>
-            </div>
-            
+
+            <div class="section-divider my-3"></div>
+
             <div class="financial-pill mb-3">
               <div class="d-flex justify-content-between align-items-center mb-1">
-                <span class="smaller-text opacity-75">Precio Venta</span>
-                <span class="fw-bold fs-6">{{ formatCurrency(linkedDetailedUnit.precio || 0) }}</span>
+                <span class="smaller-text opacity-75">Precio</span>
+                <span class="fw-bold">{{ formatCurrency(linkedDetailedUnit.precio || 0) }}</span>
               </div>
               <div class="d-flex justify-content-between align-items-center mb-1">
                 <span class="smaller-text opacity-75">Inicial</span>
-                <span class="fw-bold">{{ formatCurrency(linkedDetailedUnit.inicial || 0) }} / U$D {{ linkedDetailedUnit.inicialDolar || 0 }}</span>
+                <span class="fw-bold">{{ formatCurrency(linkedDetailedUnit.inicial || 0) }} / USD {{ linkedDetailedUnit.inicialDolar || 0 }}</span>
               </div>
               <div class="d-flex justify-content-between align-items-center mb-1">
-                <span class="smaller-text opacity-75">Pagado ({{ paymentProgress }}%)</span>
-                <span class="fw-bold text-emerald-500">{{ formatCurrency(linkedDetailedUnit.pagado || 0) }}</span>
+                <span class="smaller-text opacity-75">Pagado</span>
+                <span class="fw-bold text-emerald-500">{{ formatCurrency(linkedDetailedUnit.pagado || 0) }} ({{ paymentProgress }}%)</span>
               </div>
-              
-              <!-- Progress Bar -->
               <div class="progress-container my-2">
                 <div class="progress-bar-custom" :style="{ width: paymentProgress + '%' }"></div>
               </div>
-
-              <div class="section-divider my-2 opacity-50"></div>
               <div class="d-flex justify-content-between align-items-center">
-                <span class="smaller-text fw-bold">Balance Pendiente</span>
+                <span class="smaller-text fw-bold">Adeudado</span>
                 <span class="fw-800" :class="(linkedDetailedUnit.adeudado || 0) > 0 ? 'text-danger' : 'text-emerald-500'">
-                   {{ formatCurrency(linkedDetailedUnit.adeudado || 0) }}
+                  {{ formatCurrency(linkedDetailedUnit.adeudado || 0) }}
                 </span>
               </div>
             </div>
 
-            <div v-if="linkedDetailedUnit.formaPago" class="d-flex justify-content-between mb-3 px-1">
-              <span class="info-label">Financiamiento</span>
-              <span class="info-value text-end">{{ linkedDetailedUnit.formaPago }} - {{ linkedDetailedUnit.banco || 'N/A' }}</span>
+            <div class="info-item">
+              <span class="info-label">Forma Pago</span>
+              <span class="info-value text-end">{{ linkedDetailedUnit.formaPago || 'N/D' }}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Banco</span>
+              <span class="info-value text-end">{{ linkedDetailedUnit.banco || 'N/D' }}</span>
             </div>
 
-            <!-- HITOS -->
-            <div class="section-divider mb-3"></div>
-            <div class="mb-3">
-              <div class="section-label-tiny mb-2">HITOS DE CONSTRUCCIÓN</div>
-              <div class="d-flex gap-2">
-                 <div class="milestone-badge" :class="{ active: linkedDetailedUnit.iniciadoVaciados }" title="Vaciados">
-                    <i class="bi bi-hammer"></i>
-                 </div>
-                 <div class="milestone-badge" :class="{ active: linkedDetailedUnit.enInspeccion }" title="En Inspección">
-                    <i class="bi bi-clipboard-check"></i>
-                 </div>
-                 <div v-if="linkedDetailedUnit.inspeccion1" class="milestone-badge active" title="Inspec 1">1</div>
-                 <div v-if="linkedDetailedUnit.inspeccion2" class="milestone-badge active" title="Inspec 2">2</div>
-                 <div class="milestone-badge" :class="{ active: linkedDetailedUnit.entregada }" title="Entregada">
-                    <i class="bi bi-box-seam"></i>
-                 </div>
-                 <div class="milestone-badge" :class="{ active: linkedDetailedUnit.descargadaDGII }" title="DGII">
-                    <i class="bi bi-file-earmark-check"></i>
-                 </div>
-                 <div class="milestone-badge" :class="{ active: linkedDetailedUnit.saldo }" title="Saldado">
-                    <i class="bi bi-cash-coin"></i>
-                 </div>
+            <div class="section-divider my-3"></div>
+
+            <div class="section-label-tiny mb-2">Checkpoints</div>
+            <div class="d-flex flex-wrap gap-2 mb-3">
+              <span class="badge-premium" :class="linkedDetailedUnit.enInspeccion ? 'paid' : 'pending'">Inspeccion</span>
+              <span class="badge-premium" :class="linkedDetailedUnit.legal ? 'paid' : 'pending'">Legal</span>
+              <span class="badge-premium" :class="linkedDetailedUnit.titulo ? 'paid' : 'pending'">Titulo</span>
+              <span class="badge-premium" :class="linkedDetailedUnit.descargadaDGII ? 'paid' : 'pending'">DGII</span>
+              <span class="badge-premium" :class="linkedDetailedUnit.saldo ? 'paid' : 'pending'">Saldo</span>
+              <span class="badge-premium" :class="linkedDetailedUnit.entregada ? 'paid' : 'pending'">Entregada</span>
+            </div>
+
+            <div class="section-label-tiny mb-2">Fechas</div>
+            <div class="mini-timeline">
+              <div v-if="linkedDetailedUnit.fechaCompletaInicial" class="timeline-point">
+                <span class="point-label">Inicial</span>
+                <span class="point-date">{{ formatDate(linkedDetailedUnit.fechaCompletaInicial) }}</span>
               </div>
-            </div>
-
-            <!-- TIMELINE -->
-            <div class="section-divider mb-3"></div>
-            <div class="mb-3">
-               <div class="section-label-tiny mb-2">CRONOGRAMA DE FECHAS</div>
-               <div class="mini-timeline">
-                  <div v-if="linkedDetailedUnit.fechaCompletaInicial" class="timeline-point">
-                    <span class="point-label">Inicial</span>
-                    <span class="point-date">{{ linkedDetailedUnit.fechaCompletaInicial }}</span>
-                  </div>
-                  <div v-if="linkedDetailedUnit.fechaInicioVaciados" class="timeline-point">
-                    <span class="point-label">Vaciados</span>
-                    <span class="point-date">{{ linkedDetailedUnit.fechaInicioVaciados }}</span>
-                  </div>
-                  <div v-if="linkedDetailedUnit.fechaFormaPago" class="timeline-point">
-                    <span class="point-label">Financiamiento</span>
-                    <span class="point-date">{{ linkedDetailedUnit.fechaFormaPago }}</span>
-                  </div>
-                  <div v-if="linkedDetailedUnit.fechaLegal" class="timeline-point">
-                    <span class="point-label">Legal</span>
-                    <span class="point-date">{{ linkedDetailedUnit.fechaLegal }}</span>
-                  </div>
-                  <div v-if="linkedDetailedUnit.fechaEntregaInspeccion" class="timeline-point important">
-                    <span class="point-label">Entrega Inspec.</span>
-                    <span class="point-date">{{ linkedDetailedUnit.fechaEntregaInspeccion }}</span>
-                  </div>
-                  <div v-if="linkedDetailedUnit.fechaInspeccion1" class="timeline-point">
-                    <span class="point-label">Inspec. 1</span>
-                    <span class="point-date">{{ linkedDetailedUnit.fechaInspeccion1 }}</span>
-                  </div>
-                  <div v-if="linkedDetailedUnit.fechaInspeccion2" class="timeline-point">
-                    <span class="point-label">Inspec. 2</span>
-                    <span class="point-date">{{ linkedDetailedUnit.fechaInspeccion2 }}</span>
-                  </div>
-                  <div v-if="linkedDetailedUnit.fechaGobierno" class="timeline-point">
-                    <span class="point-label">Gobierno</span>
-                    <span class="point-date">{{ linkedDetailedUnit.fechaGobierno }}</span>
-                  </div>
-                  <div v-if="linkedDetailedUnit.fechaMicelaneos" class="timeline-point">
-                    <span class="point-label">Título</span>
-                    <span class="point-date">{{ linkedDetailedUnit.fechaMicelaneos }}</span>
-                  </div>
-               </div>
-            </div>
-
-            <div class="section-divider mb-3"></div>
-            <div class="mb-3">
-              <div class="section-label-tiny mb-2">RESPONSABLES</div>
-              <div class="d-flex flex-column gap-2">
-                <div class="resp-item">
-                  <div class="d-flex align-items-center gap-2">
-                    <div class="process-indicator sm" :class="{ active: linkedDetailedUnit.legal }">L</div>
-                    <span class="resp-label">Legal</span>
-                  </div>
-                  <span class="resp-name">{{ linkedDetailedUnit.responsableLegal || 'N/A' }}</span>
-                </div>
-                <div class="resp-item">
-                  <div class="d-flex align-items-center gap-2">
-                    <div class="process-indicator sm" :class="{ active: linkedDetailedUnit.gobierno }">G</div>
-                    <span class="resp-label">Gobierno</span>
-                  </div>
-                  <span class="resp-name">{{ linkedDetailedUnit.responsableGobierno || 'N/A' }}</span>
-                </div>
-                <div class="resp-item">
-                  <div class="d-flex align-items-center gap-2">
-                    <div class="process-indicator sm" :class="{ active: linkedDetailedUnit.micelaneos }">M</div>
-                    <span class="resp-label">Miceláneos</span>
-                  </div>
-                  <span class="resp-name">{{ linkedDetailedUnit.responsableMicelaneos || 'N/A' }}</span>
-                </div>
-                <div class="resp-item">
-                  <div class="d-flex align-items-center gap-2">
-                    <div class="process-indicator sm" :class="{ active: linkedDetailedUnit.titulo }">T</div>
-                    <span class="resp-label">Título</span>
-                  </div>
-                  <span class="resp-name">{{ linkedDetailedUnit.saldo ? 'En camino' : 'Pendiente' }}</span>
-                </div>
+              <div v-if="linkedDetailedUnit.fechaInicioVaciados" class="timeline-point">
+                <span class="point-label">Vaciados</span>
+                <span class="point-date">{{ formatDate(linkedDetailedUnit.fechaInicioVaciados) }}</span>
               </div>
-            </div>
-
-            <div class="section-divider mb-3"></div>
-            <div class="mb-3">
-              <div class="section-label-tiny mb-2">ACCIONES RÁPIDAS (MOCK)</div>
-              <div class="d-flex gap-2">
-                <button class="btn-mock" title="Exportar PDF"><i class="bi bi-file-earmark-pdf"></i></button>
-                <button class="btn-mock" title="Contactar Cliente"><i class="bi bi-chat-dots"></i></button>
-                <button class="btn-mock" title="Generar Estado Cuenta"><i class="bi bi-receipt"></i></button>
+              <div v-if="linkedDetailedUnit.fechaEntregaInspeccion" class="timeline-point">
+                <span class="point-label">Entrega/Inspeccion</span>
+                <span class="point-date">{{ formatDate(linkedDetailedUnit.fechaEntregaInspeccion) }}</span>
+              </div>
+              <div v-if="linkedDetailedUnit.fechaLegal" class="timeline-point">
+                <span class="point-label">Legal</span>
+                <span class="point-date">{{ formatDate(linkedDetailedUnit.fechaLegal) }}</span>
+              </div>
+              <div v-if="linkedDetailedUnit.fechaGobierno" class="timeline-point">
+                <span class="point-label">Gobierno</span>
+                <span class="point-date">{{ formatDate(linkedDetailedUnit.fechaGobierno) }}</span>
+              </div>
+              <div v-if="linkedDetailedUnit.fechaMicelaneos" class="timeline-point">
+                <span class="point-label">Miscelaneos</span>
+                <span class="point-date">{{ formatDate(linkedDetailedUnit.fechaMicelaneos) }}</span>
+              </div>
+              <div v-if="linkedDetailedUnit.fechaInspeccion1" class="timeline-point">
+                <span class="point-label">Inspeccion 1</span>
+                <span class="point-date">{{ formatDate(linkedDetailedUnit.fechaInspeccion1) }}</span>
+              </div>
+              <div v-if="linkedDetailedUnit.fechaInspeccion2" class="timeline-point">
+                <span class="point-label">Inspeccion 2</span>
+                <span class="point-date">{{ formatDate(linkedDetailedUnit.fechaInspeccion2) }}</span>
               </div>
             </div>
           </div>
-
           <!-- Basic Data (Always visible or fallback) -->
           <div v-if="!linkedDetailedUnit" class="basic-data-wrapper animate__animated animate__fadeIn">
              <div class="financial-pill mb-3">
@@ -255,6 +195,13 @@
             <span class="info-label">Referencia</span>
             <span class="info-value text-muted-custom font-mono">
               {{ linkedDetailedUnit?.codUnidad || ('#' + selectedUnit.id.substring(4)) }}
+            </span>
+          </div>
+
+          <div class="info-item">
+            <span class="info-label">Banco</span>
+            <span class="info-value text-truncate">
+              {{ linkedDetailedUnit?.banco || selectedUnit.bank || 'N/D' }}
             </span>
           </div>
         </div>
@@ -340,6 +287,14 @@ const closeWindow = () => {
 
 const formatCurrency = (val: number) => {
   return new Intl.NumberFormat('es-DO', { style: 'currency', currency: 'DOP', maximumFractionDigits: 0 }).format(val);
+};
+
+const formatDate = (value: string) => {
+  if (!value) return '-';
+  const raw = String(value).trim();
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw;
+  return new Intl.DateTimeFormat('es-DO', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
 };
 </script>
 

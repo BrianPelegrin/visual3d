@@ -49,7 +49,7 @@
           </div>
         </div>
 
-        <div class="control-group d-flex align-items-center gap-2">
+        <div v-if="appMode === 'edit' && !re_isViewer()" class="control-group d-flex align-items-center gap-2">
           <div class="form-check form-switch m-0">
             <input class="form-check-input" type="checkbox" role="switch" :checked="dragBuildingsEnabled" @change="toggleDragBuildings">
           </div>
@@ -96,6 +96,13 @@
 
             <div class="filter-item mb-3">
               <div class="d-flex justify-content-between align-items-center">
+                <label class="filter-label mb-0">Con Deuda</label>
+                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" :checked="visualFilters.hasDebt === true" @change="toggleFilter('hasDebt', $event)"></div>
+              </div>
+            </div>
+
+            <div class="filter-item mb-3">
+              <div class="d-flex justify-content-between align-items-center">
                 <label class="filter-label mb-0">Inspección</label>
                 <div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" :checked="visualFilters.enInspeccion === true" @change="toggleFilter('enInspeccion', $event)"></div>
               </div>
@@ -131,12 +138,18 @@
           </div>
         </div>
 
+        <button class="btn-glass-outline" @click="emit('open-color-guide')" title="Guía de Colores">
+          <i class="bi bi-palette"></i>
+        </button>
+
         <div v-if="appMode === 'edit' && re_canEditData()" class="actions-group d-flex gap-2">
           <button class="btn-glass-save" :disabled="isSaving" @click="emit('save-layout')" title="Guardar cambios">
             <i class="bi" :class="isSaving ? 'bi-arrow-repeat spin' : 'bi-cloud-check'"></i>
             <span>{{ isSaving ? 'Guardando' : 'Guardar' }}</span>
           </button>
           <button class="btn-glass-primary" @click="emit('add-building')"><i class="bi bi-plus-lg"></i><span>Edificio</span></button>
+          <input type="file" ref="excelInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="d-none" @change="onExcelFileChange" />
+          <button class="btn-glass-outline" @click="triggerExcelUpload" title="Generar desde Excel"><i class="bi bi-file-earmark-spreadsheet"></i></button>
           <input type="file" ref="fileInput" accept="image/png, image/jpeg" class="d-none" @change="onFileChange" />
           <button class="btn-glass-outline" @click="triggerFileUpload" title="Subir Plano"><i class="bi bi-cloud-arrow-up"></i></button>
         </div>
@@ -209,6 +222,7 @@
                 <option v-for="b in banks" :key="b" :value="b">{{ b }}</option>
               </select>
             </div>
+            <div class="filter-item mb-3"><div class="d-flex justify-content-between align-items-center"><label class="filter-label mb-0">Con Deuda</label><div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" :checked="visualFilters.hasDebt === true" @change="toggleFilter('hasDebt', $event)"></div></div></div>
             <div class="filter-item mb-3"><div class="d-flex justify-content-between align-items-center"><label class="filter-label mb-0">Inspección</label><div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" :checked="visualFilters.enInspeccion === true" @change="toggleFilter('enInspeccion', $event)"></div></div></div>
             <div class="filter-item mb-3"><div class="d-flex justify-content-between align-items-center"><label class="filter-label mb-0">Legal</label><div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" :checked="visualFilters.legal === true" @change="toggleFilter('legal', $event)"></div></div></div>
             <div class="filter-item mb-3"><div class="d-flex justify-content-between align-items-center"><label class="filter-label mb-0">Título</label><div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" :checked="visualFilters.titulo === true" @change="toggleFilter('titulo', $event)"></div></div></div>
@@ -223,6 +237,8 @@
           <div class="mobile-actions-grid">
             <button class="btn-glass-save w-100 justify-content-center" :disabled="isSaving" @click="emit('save-layout')"><i class="bi" :class="isSaving ? 'bi-arrow-repeat spin' : 'bi-cloud-check'"></i><span>{{ isSaving ? 'Guardando' : 'Guardar cambios' }}</span></button>
             <button class="btn-glass-primary w-100 justify-content-center" @click="emit('add-building')"><i class="bi bi-plus-lg"></i><span>Agregar edificio</span></button>
+            <input type="file" ref="excelInputMobile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="d-none" @change="onExcelFileChange" />
+            <button class="btn-glass-outline w-100 justify-content-center" @click="triggerExcelUploadMobile"><i class="bi bi-file-earmark-spreadsheet"></i><span>Generar desde Excel</span></button>
             <input type="file" ref="fileInput" accept="image/png, image/jpeg" class="d-none" @change="onFileChange" />
             <button class="btn-glass-outline w-100 justify-content-center" @click="triggerFileUpload"><i class="bi bi-cloud-arrow-up"></i><span>Subir plano</span></button>
           </div>
@@ -234,6 +250,13 @@
             <div class="link-summary-row"><span>Vinculadas</span><strong>{{ linkedUnits }} / {{ totalUnits }}</strong></div>
             <div class="link-summary-row"><span>Sin match</span><strong>{{ unmatchedUnits }}</strong></div>
           </div>
+        </div>
+
+        <div class="mobile-section">
+          <button class="btn-glass-outline w-100 justify-content-center" @click="emit('open-color-guide')">
+            <i class="bi bi-palette"></i>
+            <span>Guía de Colores</span>
+          </button>
         </div>
       </div>
     </transition>
@@ -247,12 +270,16 @@ import { appStore, setAppMode, setGridSize, setDragBuildingsEnabled, canEditData
 const re_canEditData = () => canEditData();
 const re_isViewer = () => isViewer();
 const fileInput = ref<HTMLInputElement | null>(null);
+const excelInput = ref<HTMLInputElement | null>(null);
+const excelInputMobile = ref<HTMLInputElement | null>(null);
 const mobileMenuOpen = ref(false);
 
 const emit = defineEmits<{
   (e: 'blueprint-loaded', url: string): void;
+  (e: 'excel-selected', file: File): void;
   (e: 'add-building'): void;
   (e: 'save-layout'): void;
+  (e: 'open-color-guide'): void;
 }>();
 
 const appMode = computed(() => appStore.appMode);
@@ -266,7 +293,25 @@ const linkedUnits = computed(() => projectBuildings.value.reduce((acc, building)
 const unmatchedUnits = computed(() => Math.max(totalUnits.value - linkedUnits.value, 0));
 
 const showFilters = ref(false);
-const banks = ['Apap', 'Popular', 'BHD', 'Alnap', 'Banreservas', 'Santa Cruz', 'Scotiabank', 'Cibao', 'Banesco'];
+const banks = computed(() => {
+  const unique = new Set<string>();
+
+  // Prioritize real apartment dataset banks (current project scope in store)
+  appStore.detailedUnits.forEach((apartment) => {
+    const bank = typeof apartment.banco === 'string' ? apartment.banco.trim() : '';
+    if (bank) unique.add(bank);
+  });
+
+  // Include banks already mapped at 3D unit level as fallback
+  projectBuildings.value.forEach((building) => {
+    building.units.forEach((unit) => {
+      if (typeof unit.bank === 'string' && unit.bank.trim()) {
+        unique.add(unit.bank.trim());
+      }
+    });
+  });
+  return Array.from(unique).sort((a, b) => a.localeCompare(b, 'es'));
+});
 
 const hasActiveFilters = computed(() => visualFilters.value.status !== null || visualFilters.value.bank !== null || visualFilters.value.hasDebt !== null || visualFilters.value.enInspeccion !== null || visualFilters.value.legal !== null || visualFilters.value.titulo !== null || visualFilters.value.descargadaDGII !== null || visualFilters.value.saldo !== null);
 const activeFilterCount = computed(() => [visualFilters.value.status, visualFilters.value.bank, visualFilters.value.hasDebt, visualFilters.value.enInspeccion, visualFilters.value.legal, visualFilters.value.titulo, visualFilters.value.descargadaDGII, visualFilters.value.saldo].filter(value => value !== null && value !== undefined && value !== '').length);
@@ -281,11 +326,20 @@ const updateFilter = (key: string, event: Event) => setVisualFilters({ [key]: ((
 const toggleFilter = (key: string, event: Event) => setVisualFilters({ [key]: (event.target as HTMLInputElement).checked ? true : null });
 const clearAllFilters = () => setVisualFilters({ status: null, bank: null, hasDebt: null, enInspeccion: null, legal: null, titulo: null, descargadaDGII: null, saldo: null });
 const triggerFileUpload = () => fileInput.value?.click();
+const triggerExcelUpload = () => excelInput.value?.click();
+const triggerExcelUploadMobile = () => excelInputMobile.value?.click();
 const onFileChange = (event: Event) => {
   const target = event.target as HTMLInputElement;
   const file = target.files?.[0];
   if (!file) return;
   emit('blueprint-loaded', URL.createObjectURL(file));
+  target.value = '';
+};
+const onExcelFileChange = (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) return;
+  emit('excel-selected', file);
   target.value = '';
 };
 </script>

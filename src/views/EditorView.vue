@@ -11,13 +11,17 @@
 <script setup lang="ts">
 import { onMounted, computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { setAppMode, selectProject, isViewer } from '../store/appStore';
+import { appStore, setAppMode, selectProject, isViewer } from '../store/appStore';
 import Viewport3D from '../components/Viewport3D.vue';
 
 const route = useRoute();
 const projectId = computed(() => route.params.id as string);
 const layoutNotice = computed(() => {
-  return '';
+  if (appStore.currentProjectLayoutStatus === 'missing') return appStore.currentProjectLayoutMessage;
+  if (appStore.currentProjectLayoutStatus === 'error') return appStore.currentProjectLayoutMessage || 'No se pudo cargar el layout del proyecto.';
+  if (appStore.currentProjectLayoutStatus === 'saving') return 'Guardando layout...';
+  if (appStore.currentProjectLayoutMessage && appStore.currentProjectLayoutStatus === 'ready') return appStore.currentProjectLayoutMessage;
+  return null;
 });
 
 const initProject = () => {
