@@ -1,6 +1,6 @@
 <template>
   <div v-if="show" class="guide-overlay" @click.self="emit('close')">
-    <div class="guide-modal">
+    <div class="guide-modal" role="dialog" aria-modal="true" aria-label="Guía de colores">
       <div class="guide-header">
         <div>
           <h4 class="mb-1 fw-bold">Guía de Colores 3D</h4>
@@ -19,8 +19,24 @@
 </template>
 
 <script setup lang="ts">
-defineProps<{ show: boolean }>();
+import { onMounted, onUnmounted } from 'vue';
+
+const props = defineProps<{ show: boolean }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
+
+const onKeydown = (event: KeyboardEvent) => {
+  if (event.key === 'Escape' && props.show) {
+    emit('close');
+  }
+};
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown);
+});
 
 const colorLegend = [
   { label: 'Disponible', color: '#f8fafc' },

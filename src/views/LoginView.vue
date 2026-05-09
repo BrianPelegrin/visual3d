@@ -45,6 +45,10 @@
           </div>
         </div>
 
+        <div v-if="sessionExpiredMessage" class="alert alert-warning-soft smaller-text fw-bold mb-3">
+          <i class="bi bi-clock-history me-2"></i>{{ sessionExpiredMessage }}
+        </div>
+
         <div v-if="errorMessage" class="alert alert-danger-soft smaller-text fw-bold mb-4 animate__animated animate__shakeX">
           <i class="bi bi-exclamation-triangle-fill me-2"></i>{{ errorMessage }}
         </div>
@@ -67,15 +71,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import { useRouter } from 'vue-router';
-import { login } from '../store/appStore';
+import { computed, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { consumeAuthReturnTo, login } from '../store/appStore';
 
 const router = useRouter();
+const route = useRoute();
 const email = ref('');
 const password = ref('');
 const loading = ref(false);
 const errorMessage = ref('');
+const sessionExpiredMessage = computed(() =>
+  route.query.reason === 'expired'
+    ? 'Tu sesión expiró. Inicia sesión nuevamente para continuar.'
+    : ''
+);
 
 const handleLogin = async () => {
   loading.value = true;
@@ -85,7 +95,12 @@ const handleLogin = async () => {
     const success = await login(email.value, password.value);
 
     if (success) {
-      router.push('/projects');
+      const returnTo = consumeAuthReturnTo();
+      if (returnTo && returnTo.startsWith('/')) {
+        router.replace(returnTo);
+      } else {
+        router.replace('/projects');
+      }
       return;
     }
 
@@ -235,6 +250,14 @@ const handleLogin = async () => {
   background-color: #fef2f2;
   color: #ef4444;
   border: 1px solid #fee2e2;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.alert-warning-soft {
+  background-color: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
   border-radius: 12px;
   padding: 12px;
 }

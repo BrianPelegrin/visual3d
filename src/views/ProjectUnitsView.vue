@@ -100,6 +100,12 @@
 
       <!-- UNITS TABLE -->
       <div class="card border-0 shadow-sm rounded-4 bg-white overflow-hidden">
+        <div v-if="apartmentsErrorMessage" class="list-error">
+          <div class="fw-bold text-danger mb-2">{{ apartmentsErrorMessage }}</div>
+          <button class="btn btn-outline-slate btn-sm" @click="retryApartmentsLoad">
+            <i class="bi bi-arrow-clockwise me-1"></i>Reintentar
+          </button>
+        </div>
         <div v-if="isUnitsLoading" class="list-loader">
           <div class="list-loader-spinner"></div>
           <div class="list-loader-text">Cargando apartamentos...</div>
@@ -472,7 +478,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { appStore, selectProject } from '../store/appStore';
+import { appStore, selectProject, loadProjectApartments } from '../store/appStore';
 import type { DetailedUnit } from '../models/types';
 
 const route = useRoute();
@@ -633,6 +639,11 @@ const isUnitsLoading = computed(() => {
     && appStore.currentProjectId === projectId
     && appStore.detailedUnits.length === 0;
 });
+const apartmentsErrorMessage = computed(() => appStore.apartmentsErrorByProject[projectId] || '');
+const retryApartmentsLoad = async () => {
+  if (!projectId) return;
+  await loadProjectApartments(projectId);
+};
 
 watch(() => route.params.id, (newId) => {
   if (typeof newId === 'string' && newId) {
@@ -736,6 +747,16 @@ watch(() => route.params.id, (newId) => {
 .list-loader-text {
   font-weight: 700;
   font-size: 0.9rem;
+}
+
+.list-error {
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
 }
 
 .process-dot {

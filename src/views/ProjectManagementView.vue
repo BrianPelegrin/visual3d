@@ -72,6 +72,12 @@
 
       <!-- PROJECT LIST SECTION -->
       <div class="card border-0 shadow-sm rounded-4 bg-white overflow-hidden mb-4">
+        <div v-if="projectsErrorMessage" class="list-error">
+          <div class="fw-bold text-danger mb-2">{{ projectsErrorMessage }}</div>
+          <button class="btn btn-outline-slate btn-sm" @click="retryProjectsLoad">
+            <i class="bi bi-arrow-clockwise me-1"></i>Reintentar
+          </button>
+        </div>
         <div v-if="isProjectsLoading" class="list-loader">
           <div class="list-loader-spinner"></div>
           <div class="list-loader-text">Cargando proyectos...</div>
@@ -288,7 +294,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { appStore, addProject, updateProject, deleteProject, canEditData, canDeleteData } from '../store/appStore';
+import { appStore, addProject, updateProject, deleteProject, canEditData, canDeleteData, loadProjects } from '../store/appStore';
 
 // Permission exposure for template
 const re_canEditData = () => canEditData();
@@ -314,6 +320,10 @@ watch([searchQuery, provinciaFilter, municipioFilter], () => {
 const allProjects = computed(() => appStore.projects);
 const availableIds = computed(() => appStore.availableProjectIds);
 const isProjectsLoading = computed(() => appStore.isProjectsLoading && allProjects.value.length === 0);
+const projectsErrorMessage = computed(() => appStore.projectsErrorMessage);
+const retryProjectsLoad = async () => {
+  await loadProjects();
+};
 
 // Filtered List
 const filteredProjects = computed(() => {
@@ -615,6 +625,16 @@ const enterEditMode = (id: string) => {
 .list-loader-text {
   font-weight: 700;
   font-size: 0.9rem;
+}
+
+.list-error {
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
 }
 
 /* Pagination */

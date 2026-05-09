@@ -1,6 +1,21 @@
 import { reactive } from 'vue';
 import type { Building, Unit, UnitStatus, User, Project, DetailedUnit } from '../models/types';
 import * as XLSX from 'xlsx';
+import type {
+    ApiApartmentsResponse,
+    ApiApartmentRecord,
+    ApiProjectLayoutResponse,
+    ApiApartmentStatsResponse,
+    ApiProjectsResponse,
+    ApiUsersResponse,
+    ApiSheetsResponse
+} from '../models/contracts';
+import {
+    normalizeLookupKey,
+    toBooleanOrNull,
+    toNumberOrNull,
+    toNumberOrZero
+} from '../utils/normalizers';
 
 type AuthResponse = {
     user: User;
@@ -16,6 +31,7 @@ type AuthSession = {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5153/api';
 const AUTH_STORAGE_KEY = 'auth_session';
+const AUTH_RETURN_TO_KEY = 'auth_return_to';
 let authInitializationPromise: Promise<void> | null = null;
 let projectsLoadPromise: Promise<Project[]> | null = null;
 let usersLoadPromise: Promise<User[]> | null = null;
@@ -108,6 +124,33 @@ const getAuthHeaders = () => {
     return headers;
 };
 
+const isUnauthorizedResponse = (response: Response) => response.status === 401;
+
+const handleUnauthorizedResponse = (response: Response) => {
+    if (!isUnauthorizedResponse(response)) return false;
+    const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (returnTo && returnTo !== '/login') {
+        sessionStorage.setItem(AUTH_RETURN_TO_KEY, returnTo);
+    }
+    appStore.currentUser = null;
+    appStore.accessToken = null;
+    appStore.refreshToken = null;
+    appStore.isAuthenticated = false;
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    if (window.location.pathname !== '/login') {
+        window.location.assign('/login?reason=expired');
+    }
+    return true;
+};
+
+export const consumeAuthReturnTo = () => {
+    const returnTo = sessionStorage.getItem(AUTH_RETURN_TO_KEY);
+    if (returnTo) {
+        sessionStorage.removeItem(AUTH_RETURN_TO_KEY);
+    }
+    return returnTo;
+};
+
 const syncProjectsState = (projects: Project[]) => {
     appStore.projects = projects;
     appStore.availableProjectIds = projects.map(project => project.id);
@@ -130,74 +173,37 @@ const clearProjectApartmentState = () => {
     appStore.detailedUnits = [];
 };
 
+const syncCurrentProjectApartments = (projectId: string | null) => {
+    if (!projectId) {
+        appStore.detailedUnits = [];
+        return;
+    }
+    appStore.detailedUnits = appStore.detailedUnitsByProject[projectId] ?? [];
+};
+
 const normalizeProjectsResponse = (payload: unknown): Project[] => {
-    if (Array.isArray(payload)) {
-        return payload as Project[];
-    }
-
-    if (!payload || typeof payload !== 'object') {
-        return [];
-    }
-
-    const candidate = payload as {
-        projects?: Project[];
-        data?: Project[];
-        items?: Project[];
-        result?: Project[];
-    };
-
-    return candidate.projects
-        ?? candidate.data
-        ?? candidate.items
-        ?? candidate.result
-        ?? [];
+    const source = payload as ApiProjectsResponse & { projects?: Project[] };
+    if (Array.isArray(source)) return source;
+    if (!source || typeof source !== 'object') return [];
+    return source.projects ?? source.data ?? source.items ?? source.result ?? [];
 };
 
 const normalizeUsersResponse = (payload: unknown): User[] => {
-    if (Array.isArray(payload)) {
-        return payload as User[];
-    }
-
-    if (!payload || typeof payload !== 'object') {
-        return [];
-    }
-
-    const candidate = payload as {
-        users?: User[];
-        data?: User[];
-        items?: User[];
-        result?: User[];
-    };
-
-    return candidate.users
-        ?? candidate.data
-        ?? candidate.items
-        ?? candidate.result
-        ?? [];
+    const source = payload as ApiUsersResponse & { users?: User[] };
+    if (Array.isArray(source)) return source;
+    if (!source || typeof source !== 'object') return [];
+    return source.users ?? source.data ?? source.items ?? source.result ?? [];
 };
 
 const normalizeStringListResponse = (payload: unknown): string[] => {
-    if (Array.isArray(payload)) {
-        return payload.filter(item => typeof item === 'string') as string[];
+    const source = payload as ApiSheetsResponse & { sheets?: unknown };
+    if (Array.isArray(source)) {
+        return source.filter(item => typeof item === 'string') as string[];
     }
 
-    if (!payload || typeof payload !== 'object') {
-        return [];
-    }
+    if (!source || typeof source !== 'object') return [];
 
-    const candidate = payload as {
-        sheets?: unknown;
-        data?: unknown;
-        items?: unknown;
-        result?: unknown;
-    };
-
-    const possibleLists = [
-        candidate.sheets,
-        candidate.data,
-        candidate.items,
-        candidate.result
-    ];
+    const possibleLists = [source.sheets, source.data, source.items, source.result];
 
     for (const list of possibleLists) {
         if (Array.isArray(list)) {
@@ -224,16 +230,6 @@ const normalizeProjectResponse = (payload: unknown): Project | null => {
     }
 
     return null;
-};
-
-type ProjectLayoutResponse = {
-    projectId?: string;
-    gridSize?: number;
-    buildings?: Building[];
-    layout?: {
-        gridSize?: number;
-        buildings?: Building[];
-    };
 };
 
 const DEFAULT_LAYOUT_COLS = 2;
@@ -296,7 +292,7 @@ const normalizeLayoutResponse = (payload: unknown): { gridSize?: number; buildin
         return { buildings: [] };
     }
 
-    const candidate = payload as ProjectLayoutResponse;
+    const candidate = payload as ApiProjectLayoutResponse;
     const source = candidate.layout ?? candidate;
     const buildings = Array.isArray(source.buildings) ? source.buildings : [];
 
@@ -333,59 +329,30 @@ const normalizeDetailedUnitsResponse = (payload: unknown): DetailedUnit[] => {
         return [];
     }
 
-    const candidate = payload as {
-        apartments?: DetailedUnit[];
-        detailedUnits?: DetailedUnit[];
-        data?: DetailedUnit[];
-        items?: DetailedUnit[];
-        result?: DetailedUnit[];
+    const candidate = payload as ApiApartmentsResponse;
+    const container = candidate as {
+        apartments?: ApiApartmentRecord[];
+        detailedUnits?: ApiApartmentRecord[];
+        data?: ApiApartmentRecord[];
+        items?: ApiApartmentRecord[];
+        result?: ApiApartmentRecord[];
     };
 
-    const rawUnits = (candidate.apartments
-        ?? candidate.detailedUnits
-        ?? candidate.data
-        ?? candidate.items
-        ?? candidate.result
+    const rawUnits = (container.apartments
+        ?? container.detailedUnits
+        ?? container.data
+        ?? container.items
+        ?? container.result
         ?? []) as unknown[];
 
     if (!Array.isArray(rawUnits)) return [];
 
-    const asBoolOrNull = (value: unknown): boolean | null => {
-        if (value === null || value === undefined || value === '') return null;
-        if (typeof value === 'boolean') return value;
-        if (typeof value === 'number') return value > 0;
-        if (typeof value === 'string') {
-            const normalized = value.trim().toLowerCase();
-            if (['si', 'sí', 's', 'yes', 'true', '1', 'entregado'].includes(normalized)) return true;
-            if (['no', 'n', 'false', '0'].includes(normalized)) return false;
-        }
-        return null;
-    };
-
-    const asNumberOrZero = (value: unknown) => {
-        if (typeof value === 'number' && Number.isFinite(value)) return value;
-        if (typeof value === 'string') {
-            const parsed = Number(value.replace(/,/g, '').trim());
-            if (Number.isFinite(parsed)) return parsed;
-        }
-        return 0;
-    };
-
-    const asNumberOrNull = (value: unknown): number | null => {
-        if (value === null || value === undefined || value === '') return null;
-        if (typeof value === 'number' && Number.isFinite(value)) return value;
-        if (typeof value === 'string') {
-            const parsed = Number(value.replace(/,/g, '').trim());
-            if (Number.isFinite(parsed)) return parsed;
-        }
-        return null;
-    };
-
     return rawUnits.map((raw): DetailedUnit => {
-        const row = raw as Record<string, unknown>;
+        const row = raw as ApiApartmentRecord;
+        const rowRecord = row as Record<string, unknown>;
         const get = (...keys: string[]) => {
             for (const key of keys) {
-                if (row[key] !== undefined) return row[key];
+                if (rowRecord[key] !== undefined) return rowRecord[key];
             }
             return undefined;
         };
@@ -394,23 +361,40 @@ const normalizeDetailedUnitsResponse = (payload: unknown): DetailedUnit[] => {
         const unidad = String(get('unidad', 'Unidad') ?? '');
         const codUnidad = String(get('codUnidad', 'CodUnidad', 'codigoUnidad', 'CodigoUnidad') ?? '').trim()
             || `${edificio}-${unidad}`.trim();
+        const precio = Math.max(0, toNumberOrZero(get('precio', 'Precio')));
+        const pagadoRaw = toNumberOrNull(get('pagado', 'Pagado'));
+        const pagado = pagadoRaw === null ? null : Math.max(0, pagadoRaw);
+        const adeudadoRaw = toNumberOrNull(get('adeudado', 'Adeudado'));
+
+        // Normaliza valores financieros para evitar balances negativos "sin sentido"
+        // cuando el backend/envio tiene deuda inconsistente con precio/pagado.
+        let adeudado: number | null = adeudadoRaw;
+        if (typeof adeudado === 'number') {
+            if (Math.abs(adeudado) < 0.01) adeudado = 0;
+            if (adeudado < 0) {
+                const recalculated = pagado !== null ? Math.max(0, precio - pagado) : 0;
+                adeudado = recalculated;
+            }
+        } else if (pagado !== null) {
+            adeudado = Math.max(0, precio - pagado);
+        }
 
         return {
             id: Number(get('id', 'Id') ?? 0),
             codUnidad,
             edificio,
             unidad,
-            metraje: asNumberOrZero(get('metraje', 'Metraje')),
+            metraje: toNumberOrZero(get('metraje', 'Metraje')),
             estado: String(get('estado', 'Estado') ?? ''),
             nombre: String(get('nombre', 'Nombre') ?? ''),
             telefono: String(get('telefono', 'Telefono') ?? ''),
             correo: String(get('correo', 'Correo') ?? ''),
             cedula: String(get('cedula', 'Cedula') ?? ''),
-            precio: asNumberOrZero(get('precio', 'Precio')),
-            inicial: asNumberOrNull(get('inicial', 'Inicial')),
-            inicialDolar: asNumberOrNull(get('inicialDolar', 'InicialDolar', 'inicialUSD', 'InicialUSD')),
-            pagado: asNumberOrNull(get('pagado', 'Pagado')),
-            adeudado: asNumberOrNull(get('adeudado', 'Adeudado')),
+            precio,
+            inicial: toNumberOrNull(get('inicial', 'Inicial')),
+            inicialDolar: toNumberOrNull(get('inicialDolar', 'InicialDolar', 'inicialUSD', 'InicialUSD')),
+            pagado,
+            adeudado,
             fechaCompletaInicial: (get('fechaCompletaInicial', 'FechaCompletaInicial') ?? null) as string | null,
             fechaInicioVaciados: (get('fechaInicioVaciados', 'FechaInicioVaciados') ?? null) as string | null,
             fechaEntregaInspeccion: (get('fechaEntregaInspeccion', 'FechaEntregaInspeccion') ?? null) as string | null,
@@ -420,22 +404,22 @@ const normalizeDetailedUnitsResponse = (payload: unknown): DetailedUnit[] => {
             fechaInspeccion1: (get('fechaInspeccion1', 'FechaInspeccion1') ?? null) as string | null,
             fechaInspeccion2: (get('fechaInspeccion2', 'FechaInspeccion2') ?? null) as string | null,
             fechaFormaPago: (get('fechaFormaPago', 'FechaFormaPago') ?? null) as string | null,
-            iniciadoVaciados: asBoolOrNull(get('iniciadoVaciados', 'IniciadoVaciados')),
-            enInspeccion: asBoolOrNull(get('enInspeccion', 'EnInspeccion')),
-            inspeccion1: asBoolOrNull(get('inspeccion1', 'Inspeccion1')),
-            inspeccion2: asBoolOrNull(get('inspeccion2', 'Inspeccion2')),
-            legal: asBoolOrNull(get('legal', 'Legal')),
-            gobierno: asBoolOrNull(get('gobierno', 'Gobierno')),
-            micelaneos: asBoolOrNull(get('micelaneos', 'Micelaneos')),
-            titulo: asBoolOrNull(get('titulo', 'Titulo')),
+            iniciadoVaciados: toBooleanOrNull(get('iniciadoVaciados', 'IniciadoVaciados')),
+            enInspeccion: toBooleanOrNull(get('enInspeccion', 'EnInspeccion')),
+            inspeccion1: toBooleanOrNull(get('inspeccion1', 'Inspeccion1')),
+            inspeccion2: toBooleanOrNull(get('inspeccion2', 'Inspeccion2')),
+            legal: toBooleanOrNull(get('legal', 'Legal')),
+            gobierno: toBooleanOrNull(get('gobierno', 'Gobierno')),
+            micelaneos: toBooleanOrNull(get('micelaneos', 'Micelaneos')),
+            titulo: toBooleanOrNull(get('titulo', 'Titulo')),
             responsableLegal: String(get('responsableLegal', 'ResponsableLegal') ?? ''),
             responsableGobierno: String(get('responsableGobierno', 'ResponsableGobierno') ?? ''),
             responsableMicelaneos: String(get('responsableMicelaneos', 'ResponsableMicelaneos') ?? ''),
             formaPago: String(get('formaPago', 'FormaPago') ?? ''),
             banco: String(get('banco', 'Banco') ?? '').trim(),
-            saldo: asBoolOrNull(get('saldo', 'Saldo')),
-            entregada: asBoolOrNull(get('entregada', 'Entregada')),
-            descargadaDGII: asBoolOrNull(get('descargadaDGII', 'DescargadaDGII'))
+            saldo: toBooleanOrNull(get('saldo', 'Saldo')),
+            entregada: toBooleanOrNull(get('entregada', 'Entregada')),
+            descargadaDGII: toBooleanOrNull(get('descargadaDGII', 'DescargadaDGII'))
         };
     });
 };
@@ -459,12 +443,6 @@ const getApartmentCandidates = (building: Building, unit: Unit) => {
         rawName.includes(' ') ? rawName.replace(/\s+/g, '-') : rawName
     ].filter((value): value is string => Boolean(value)));
 };
-
-const normalizeLookupKey = (value: unknown) => String(value ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '')
-    .replace(/_/g, '-');
 
 const normalizeDetailedUnitStatus = (apartment: DetailedUnit): UnitStatus => {
     const estado = String(apartment.estado ?? '')
@@ -583,26 +561,13 @@ const getHeaderIndexes = (headers: unknown[], aliases: string[]) => {
 };
 
 const toOptionalNumber = (value: unknown): number | undefined => {
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-    if (typeof value === 'string') {
-        const cleaned = value.replace(/,/g, '').trim();
-        if (!cleaned) return undefined;
-        const parsed = Number(cleaned);
-        if (Number.isFinite(parsed)) return parsed;
-    }
-    return undefined;
+    const parsed = toNumberOrNull(value);
+    return parsed === null ? undefined : parsed;
 };
 
 const toBooleanFromExcel = (value: unknown): boolean | undefined => {
-    if (typeof value === 'boolean') return value;
-    if (typeof value === 'number') return value > 0;
-    if (typeof value !== 'string') return undefined;
-
-    const normalized = value.trim().toLowerCase();
-    if (!normalized) return undefined;
-    if (['si', 'sí', 's', 'yes', 'true', '1', 'entregado'].includes(normalized)) return true;
-    if (['no', 'n', 'false', '0'].includes(normalized)) return false;
-    return undefined;
+    const parsed = toBooleanOrNull(value);
+    return parsed === null ? undefined : parsed;
 };
 
 const toUnitStatus = (rawStatus: string, financed: boolean, delivered: boolean, inspection: boolean): UnitStatus => {
@@ -848,6 +813,8 @@ interface AppState {
     users: User[];
     projects: Project[];
     detailedUnits: DetailedUnit[];
+    detailedUnitsByProject: Record<string, DetailedUnit[]>;
+    apartmentStatsByProject: Record<string, ApiApartmentStatsResponse>;
     availableProjectIds: string[];
     currentUser: User | null;
     accessToken: string | null;
@@ -860,6 +827,9 @@ interface AppState {
     currentProjectLayoutMessage: string;
     isProjectsLoading: boolean;
     isApartmentsLoading: boolean;
+    isApartmentsLoadingByProject: Record<string, boolean>;
+    projectsErrorMessage: string;
+    apartmentsErrorByProject: Record<string, string>;
     networkBusyCount: number;
     isProjectContextLoading: boolean;
     visualFilters: {
@@ -883,6 +853,8 @@ export const appStore = reactive<AppState>({
     projects: [],
     availableProjectIds: [],
     detailedUnits: [],
+    detailedUnitsByProject: {},
+    apartmentStatsByProject: {},
     currentUser: null,
     accessToken: null,
     refreshToken: null,
@@ -894,6 +866,9 @@ export const appStore = reactive<AppState>({
     currentProjectLayoutMessage: '',
     isProjectsLoading: false,
     isApartmentsLoading: false,
+    isApartmentsLoadingByProject: {},
+    projectsErrorMessage: '',
+    apartmentsErrorByProject: {},
     networkBusyCount: 0,
     isProjectContextLoading: false,
     visualFilters: {
@@ -915,24 +890,28 @@ export const selectProject = (id: string | null) => {
 
     if (id) {
         clearProjectLayoutState(id);
-        clearProjectApartmentState();
+        syncCurrentProjectApartments(id);
         appStore.currentProjectLayoutStatus = 'loading';
         appStore.currentProjectLayoutMessage = '';
         appStore.isProjectContextLoading = true;
         void Promise.allSettled([
             loadProjectLayout(id),
-            loadProjectApartments(id)
+            loadProjectApartments(id),
+            loadProjectApartmentStats(id)
         ]).finally(() => {
             if (appStore.currentProjectId === id) {
                 appStore.isProjectContextLoading = false;
             }
         });
     } else {
+        clearProjectApartmentState();
         appStore.currentProjectLayoutStatus = 'idle';
         appStore.currentProjectLayoutMessage = '';
         appStore.isProjectContextLoading = false;
     }
 };
+
+export const getProjectApartmentStats = (projectId: string) => appStore.apartmentStatsByProject[projectId] ?? null;
 
 export const setAppMode = (mode: 'edit' | 'view') => {
     appStore.appMode = mode;
@@ -1210,12 +1189,7 @@ export const updateUser = async (id: number, updates: Partial<User> & { oldPassw
         // Fall back to local optimistic update below.
     }
 
-    if (user) {
-        Object.assign(user, updates);
-        return user;
-    }
-
-    return nextUser;
+    return null;
 };
 
 export const updateProfile = async (updates: Partial<User> & { oldPassword?: string }): Promise<User | null> => {
@@ -1350,7 +1324,9 @@ export const login = async (email: string, password?: string) => {
 
     void loadProjects();
     void loadAvailableProjectIds();
-    void loadUsers();
+    if (normalizedUser.role === 'admin') {
+        void loadUsers();
+    }
 
     return true;
 };
@@ -1385,6 +1361,7 @@ export const ensureAuthInitialized = async () => {
                 }
             });
 
+            if (handleUnauthorizedResponse(response)) return;
             if (!response.ok) return;
 
             const refreshedUser = normalizeUserResponse(await response.json());
@@ -1405,7 +1382,7 @@ export const ensureAuthInitialized = async () => {
         await Promise.all([
             loadProjects(),
             loadAvailableProjectIds(),
-            loadUsers()
+            ...(appStore.currentUser?.role === 'admin' ? [loadUsers()] : [])
         ]);
     })();
 
@@ -1444,6 +1421,9 @@ export const loadUsers = async () => {
             }
         });
 
+        if (handleUnauthorizedResponse(response)) {
+            return [];
+        }
         if (!response.ok) {
             return appStore.users;
         }
@@ -1474,6 +1454,7 @@ export const loadProjects = async () => {
     projectsLoadPromise = (async () => {
     beginNetworkActivity();
     appStore.isProjectsLoading = true;
+    appStore.projectsErrorMessage = '';
     try {
         const response = await fetch(`${API_BASE_URL}/Projects`, {
             headers: {
@@ -1481,7 +1462,11 @@ export const loadProjects = async () => {
             }
         });
 
+        if (handleUnauthorizedResponse(response)) {
+            return [];
+        }
         if (!response.ok) {
+            appStore.projectsErrorMessage = 'No se pudieron cargar los proyectos.';
             return appStore.projects;
         }
 
@@ -1490,6 +1475,7 @@ export const loadProjects = async () => {
         syncProjectsState(projects);
         return projects;
     } catch (_error) {
+        appStore.projectsErrorMessage = 'No se pudieron cargar los proyectos.';
         return appStore.projects;
     } finally {
         projectsLoadPromise = null;
@@ -1510,6 +1496,9 @@ export const loadProjectLayout = async (projectId: string) => {
             }
         });
 
+        if (handleUnauthorizedResponse(response)) {
+            return null;
+        }
         if (!response.ok) {
             let message = '';
             try {
@@ -1519,7 +1508,11 @@ export const loadProjectLayout = async (projectId: string) => {
                 // Ignore malformed error payloads.
             }
 
-            if (message.toLowerCase().includes('does not have a layout configured')) {
+            const lowered = message.toLowerCase();
+            const isMissingLayoutMessage = lowered.includes('does not have a layout configured')
+                || lowered.includes('no tiene un layout configurado')
+                || (lowered.includes('layout') && lowered.includes('no tiene'));
+            if (isMissingLayoutMessage) {
                 if (appStore.currentProjectId === projectId) {
                     appStore.currentProjectLayoutStatus = 'missing';
                     appStore.currentProjectLayoutMessage = 'Este proyecto aun no tiene un layout configurado. Puedes comenzar a crearlo desde el editor.';
@@ -1559,7 +1552,9 @@ export const loadProjectLayout = async (projectId: string) => {
 
 export const loadProjectApartments = async (projectId: string) => {
     beginNetworkActivity();
-    appStore.isApartmentsLoading = true;
+    appStore.isApartmentsLoadingByProject[projectId] = true;
+    appStore.isApartmentsLoading = appStore.currentProjectId === projectId;
+    appStore.apartmentsErrorByProject[projectId] = '';
     try {
         const response = await fetch(`${API_BASE_URL}/Projects/${projectId}/apartments`, {
             headers: {
@@ -1567,24 +1562,67 @@ export const loadProjectApartments = async (projectId: string) => {
             }
         });
 
+        if (handleUnauthorizedResponse(response)) {
+            return [];
+        }
         if (!response.ok) {
-            return appStore.detailedUnits;
+            appStore.apartmentsErrorByProject[projectId] = 'No se pudieron cargar los apartamentos del proyecto.';
+            return appStore.detailedUnitsByProject[projectId] ?? [];
         }
 
         const payload = await response.json();
         const apartments = normalizeDetailedUnitsResponse(payload);
 
-        if (appStore.currentProjectId !== projectId) {
-            return apartments;
+        appStore.detailedUnitsByProject[projectId] = apartments;
+        if (appStore.currentProjectId === projectId) {
+            syncCurrentProjectApartments(projectId);
+            linkProjectApartmentsToLayout(projectId);
         }
-
-        appStore.detailedUnits = apartments;
-        linkProjectApartmentsToLayout(projectId);
         return apartments;
     } catch (_error) {
-        return appStore.detailedUnits;
+        appStore.apartmentsErrorByProject[projectId] = 'No se pudieron cargar los apartamentos del proyecto.';
+        return appStore.detailedUnitsByProject[projectId] ?? [];
     } finally {
-        appStore.isApartmentsLoading = false;
+        appStore.isApartmentsLoadingByProject[projectId] = false;
+        appStore.isApartmentsLoading = appStore.currentProjectId ? Boolean(appStore.isApartmentsLoadingByProject[appStore.currentProjectId]) : false;
+        endNetworkActivity();
+    }
+};
+
+export const loadProjectApartmentStats = async (projectId: string) => {
+    beginNetworkActivity();
+    try {
+        const response = await fetch(`${API_BASE_URL}/Projects/${projectId}/apartments/stats`, {
+            headers: {
+                ...getAuthHeaders()
+            }
+        });
+
+        if (handleUnauthorizedResponse(response)) {
+            return null;
+        }
+
+        if (!response.ok) {
+            return appStore.apartmentStatsByProject[projectId] ?? null;
+        }
+
+        const payload = await response.json() as Partial<ApiApartmentStatsResponse>;
+        const normalized: ApiApartmentStatsResponse = {
+            projectId: String(payload.projectId ?? projectId),
+            edificios: Number(payload.edificios ?? 0),
+            vendida: Number(payload.vendida ?? 0),
+            totalUnidades: Number(payload.totalUnidades ?? 0),
+            unidadesEntregadas: Number(payload.unidadesEntregadas ?? 0),
+            unidadesConSaldo: Number(payload.unidadesConSaldo ?? 0),
+            unidadesEnInspeccion: Number(payload.unidadesEnInspeccion ?? 0),
+            disponiblesObservacion: Number(payload.disponiblesObservacion ?? 0)
+        };
+
+        appStore.apartmentStatsByProject[projectId] = normalized;
+        return normalized;
+    } catch (_error) {
+        return appStore.apartmentStatsByProject[projectId] ?? null;
+    } finally {
         endNetworkActivity();
     }
 };
@@ -1693,6 +1731,7 @@ export const saveProjectLayout = async () => {
     const projectBuildings = appStore.buildings.filter(building => building.projectId === projectId);
     appStore.currentProjectLayoutStatus = 'saving';
     appStore.currentProjectLayoutMessage = '';
+    beginNetworkActivity();
 
     try {
         const response = await fetch(`${API_BASE_URL}/Projects/${projectId}/layout`, {
@@ -1708,6 +1747,9 @@ export const saveProjectLayout = async () => {
             })
         });
 
+        if (handleUnauthorizedResponse(response)) {
+            return null;
+        }
         if (!response.ok) {
             let message = '';
             try {
@@ -1732,6 +1774,8 @@ export const saveProjectLayout = async () => {
         appStore.currentProjectLayoutStatus = 'error';
         appStore.currentProjectLayoutMessage = 'No se pudo guardar el layout del proyecto.';
         return null;
+    } finally {
+        endNetworkActivity();
     }
 };
 
@@ -1749,6 +1793,9 @@ export const loadAvailableProjectIds = async () => {
             }
         });
 
+        if (handleUnauthorizedResponse(response)) {
+            return [];
+        }
         if (!response.ok) {
             return appStore.availableProjectIds;
         }
@@ -1783,19 +1830,16 @@ export const addProject = async (project: Project) => {
             body: JSON.stringify(project)
         });
 
-        if (response.ok) {
-            const createdProject = normalizeProjectResponse(await response.json()) ?? project;
-            appStore.projects.push(createdProject);
-            appStore.availableProjectIds = appStore.projects.map(item => item.id);
-            return createdProject;
+        if (!response.ok) {
+            throw new Error('No se pudo crear el proyecto.');
         }
+        const createdProject = normalizeProjectResponse(await response.json()) ?? project;
+        appStore.projects.push(createdProject);
+        appStore.availableProjectIds = appStore.projects.map(item => item.id);
+        return createdProject;
     } catch (_error) {
-        // Fall back to optimistic local update below.
+        return null;
     }
-
-    appStore.projects.push(project);
-    appStore.availableProjectIds = appStore.projects.map(item => item.id);
-    return project;
 };
 
 export const updateProject = async (id: string, updates: Partial<Project>) => {
@@ -1812,17 +1856,15 @@ export const updateProject = async (id: string, updates: Partial<Project>) => {
             body: JSON.stringify({ ...project, ...updates })
         });
 
-        if (response.ok) {
-            const updatedProject = normalizeProjectResponse(await response.json()) ?? { ...project, ...updates };
-            Object.assign(project, updatedProject);
-            return updatedProject;
+        if (!response.ok) {
+            throw new Error('No se pudo actualizar el proyecto.');
         }
+        const updatedProject = normalizeProjectResponse(await response.json()) ?? { ...project, ...updates };
+        Object.assign(project, updatedProject);
+        return updatedProject;
     } catch (_error) {
-        // Fall back to optimistic local update below.
+        return null;
     }
-
-    Object.assign(project, updates);
-    return project;
 };
 
 export const deleteProject = async (id: string) => {
@@ -1834,21 +1876,16 @@ export const deleteProject = async (id: string) => {
             }
         });
 
-        if (response.ok) {
-            const index = appStore.projects.findIndex(p => p.id === id);
-            if (index > -1) {
-                appStore.projects.splice(index, 1);
-                appStore.availableProjectIds = appStore.projects.map(item => item.id);
-            }
-            return;
+        if (!response.ok) {
+            throw new Error('No se pudo eliminar el proyecto.');
         }
+        const index = appStore.projects.findIndex(p => p.id === id);
+        if (index > -1) {
+            appStore.projects.splice(index, 1);
+            appStore.availableProjectIds = appStore.projects.map(item => item.id);
+        }
+        return true;
     } catch (_error) {
-        // Fall back to local removal below.
-    }
-
-    const index = appStore.projects.findIndex(p => p.id === id);
-    if (index > -1) {
-        appStore.projects.splice(index, 1);
-        appStore.availableProjectIds = appStore.projects.map(item => item.id);
+        return false;
     }
 };

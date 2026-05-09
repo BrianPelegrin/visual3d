@@ -1,10 +1,4 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import DashboardView from '../views/DashboardView.vue';
-import EditorView from '../views/EditorView.vue';
-import UserManagementView from '../views/UserManagementView.vue';
-import ProjectManagementView from '../views/ProjectManagementView.vue';
-import ProjectUnitsView from '../views/ProjectUnitsView.vue';
-import LoginView from '../views/LoginView.vue';
 import { appStore, ensureAuthInitialized } from '../store/appStore';
 
 const router = createRouter({
@@ -17,33 +11,33 @@ const router = createRouter({
     {
       path: '/dashboard/:id?',
       name: 'dashboard',
-      component: DashboardView
+      component: () => import('../views/DashboardView.vue')
     },
     {
       path: '/editor/:id?',
       name: 'editor',
-      component: EditorView
+      component: () => import('../views/EditorView.vue')
     },
     {
       path: '/users',
       name: 'users',
-      component: UserManagementView,
+      component: () => import('../views/UserManagementView.vue'),
       meta: { requiresAdmin: true }
     },
     {
       path: '/projects',
       name: 'projects',
-      component: ProjectManagementView
+      component: () => import('../views/ProjectManagementView.vue')
     },
     {
       path: '/projects/:id/units',
       name: 'project-units',
-      component: ProjectUnitsView
+      component: () => import('../views/ProjectUnitsView.vue')
     },
     {
       path: '/login',
       name: 'login',
-      component: LoginView
+      component: () => import('../views/LoginView.vue')
     }
   ]
 });

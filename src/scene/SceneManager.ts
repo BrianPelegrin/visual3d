@@ -21,9 +21,12 @@ export class SceneManager {
     private animationId: number | null = null;
     private gridHelper: THREE.GridHelper | null = null;
     private currentGridSize: number = 300;
+    private blueprintAspectRatio: number = 1;
+    private readonly onResizeHandler: () => void;
 
     constructor(container: HTMLElement) {
         this.container = container;
+        this.onResizeHandler = this.onWindowResize.bind(this);
 
         // 1. Scene
         this.scene = new THREE.Scene();
@@ -65,7 +68,7 @@ export class SceneManager {
         this.setupRaycaster();
 
         // Event Listeners
-        window.addEventListener('resize', this.onWindowResize.bind(this));
+        window.addEventListener('resize', this.onResizeHandler);
     }
 
     private setupLights() {
@@ -90,7 +93,6 @@ export class SceneManager {
     }
 
     public setGridSize(size: number) {
-        const oldSize = this.currentGridSize;
         this.currentGridSize = size;
         
         if (this.gridHelper) {
@@ -102,13 +104,7 @@ export class SceneManager {
             this.scene.add(this.gridHelper);
         }
 
-        // Scale blueprint if exists
-        const blueprint = this.scene.getObjectByName('blueprint');
-        if (blueprint) {
-            const scaleFactor = size / oldSize;
-            blueprint.scale.x *= scaleFactor;
-            blueprint.scale.y *= scaleFactor;
-        }
+        this.updateBlueprintTransform();
     }
 
     public start() {
@@ -153,13 +149,10 @@ export class SceneManager {
                 ((oldBlueprint as THREE.Mesh).material as THREE.Material).dispose();
             }
 
-            // Create flat plane
+            // Create flat plane and scale it later according to layout bounds
             const imageAspect = texture.image.width / texture.image.height;
-            // Base blueprint size on 80% of current grid size
-            const geometryWidth = this.currentGridSize * 0.8;
-            const geometryHeight = geometryWidth / imageAspect;
-
-            const geometry = new THREE.PlaneGeometry(geometryWidth, geometryHeight);
+            this.blueprintAspectRatio = Number.isFinite(imageAspect) && imageAspect > 0 ? imageAspect : 1;
+            const geometry = new THREE.PlaneGeometry(1, 1);
             const material = new THREE.MeshBasicMaterial({
                 map: texture,
                 side: THREE.DoubleSide // make it visible from underneath just in case
@@ -175,6 +168,7 @@ export class SceneManager {
             plane.position.y = -0.01;
 
             this.scene.add(plane);
+            this.updateBlueprintTransform();
 
             // Hide the grid once a blueprint is loaded
             if (this.gridHelper) {
@@ -424,6 +418,11 @@ export class SceneManager {
                 group.add(balcony);
             });
         });
+
+        // Keep blueprint aligned with the current layout bounds after every sync.
+        // Without this, depending on async load order between layout and image,
+        // the blueprint can keep an old scale and look "descuadrado" across views.
+        this.updateBlueprintTransform();
     }
 
     // Invisible floor plane used for raycasting drag positions
@@ -560,6 +559,44 @@ export class SceneManager {
             this.controls.enabled = true;
             setTimeout(() => { this.isDragging = false; }, 50);
         });
+
+        this.updateBlueprintTransform();
+    }
+
+    private updateBlueprintTransform() {
+        const blueprint = this.scene.getObjectByName('blueprint') as THREE.Mesh | null;
+        if (!blueprint) return;
+
+        let targetWidth = this.currentGridSize * 0.8;
+        let targetDepth = this.currentGridSize * 0.8;
+
+        const buildingsGroup = this.scene.getObjectByName('buildingsGroup');
+        if (buildingsGroup && buildingsGroup.children.length > 0) {
+            const bounds = new THREE.Box3().setFromObject(buildingsGroup);
+            const width = bounds.max.x - bounds.min.x;
+            const depth = bounds.max.z - bounds.min.z;
+            if (Number.isFinite(width) && Number.isFinite(depth) && width > 0 && depth > 0) {
+                const padding = 1.15;
+                targetWidth = width * padding;
+                targetDepth = depth * padding;
+            }
+        }
+
+        const targetRatio = targetWidth / Math.max(targetDepth, 0.0001);
+        let planeWidth: number;
+        let planeDepth: number;
+
+        // Cover strategy: keeps buildings inside the blueprint footprint across aspect ratios.
+        if (this.blueprintAspectRatio > targetRatio) {
+            planeDepth = targetDepth;
+            planeWidth = planeDepth * this.blueprintAspectRatio;
+        } else {
+            planeWidth = targetWidth;
+            planeDepth = planeWidth / this.blueprintAspectRatio;
+        }
+
+        blueprint.scale.set(planeWidth, planeDepth, 1);
+        blueprint.position.set(0, -0.01, 0);
     }
 
     private findBuildingGroup(object: THREE.Object3D): THREE.Group | null {
@@ -582,7 +619,7 @@ export class SceneManager {
 
     public dispose() {
         this.stop();
-        window.removeEventListener('resize', this.onWindowResize.bind(this));
+        window.removeEventListener('resize', this.onResizeHandler);
         if (this.container && this.renderer.domElement) {
             this.container.removeChild(this.renderer.domElement);
         }

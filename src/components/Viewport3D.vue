@@ -6,8 +6,8 @@
     <ColorGuideModal :show="showColorGuide" @close="showColorGuide = false" />
     <div ref="canvasContainer" class="canvas-container"></div>
 
-    <div v-if="showExcelPreviewModal" class="excel-modal-overlay">
-      <div class="excel-modal-card">
+    <div v-if="showExcelPreviewModal" class="excel-modal-overlay" @click.self="cancelExcelGeneration">
+      <div class="excel-modal-card" role="dialog" aria-modal="true" aria-label="Confirmación de generación desde Excel">
         <div class="excel-modal-header">
           <h5 class="excel-modal-title">
             <i class="bi bi-file-earmark-spreadsheet me-2"></i>
@@ -206,6 +206,18 @@ onUnmounted(() => {
   if (sceneManager) {
     sceneManager.dispose();
   }
+  window.removeEventListener('keydown', onModalEscape);
+});
+
+const onModalEscape = (event: KeyboardEvent) => {
+  if (event.key !== 'Escape') return;
+  if (showExcelPreviewModal.value && !isApplyingExcel.value) {
+    cancelExcelGeneration();
+  }
+};
+
+onMounted(() => {
+  window.addEventListener('keydown', onModalEscape);
 });
 </script>
 

@@ -200,6 +200,7 @@ import { appStore, selectProject, selectUnit, setAppMode } from '../store/appSto
 import type { Unit, DetailedUnit } from '../models/types';
 import Viewport3D from '../components/Viewport3D.vue';
 import ColorGuideModal from '../components/ui/ColorGuideModal.vue';
+import { parseDateValue } from '../utils/normalizers';
 import { Bar, Doughnut } from 'vue-chartjs';
 import {
   Chart as ChartJS,
@@ -231,7 +232,8 @@ const showColorGuide = ref(false);
 
 const project = computed(() => appStore.projects.find((p) => p.id === projectId.value));
 const projectBuildings = computed(() => appStore.buildings.filter((b) => b.projectId === projectId.value));
-const buildingsCount = computed(() => projectBuildings.value.length);
+const projectStats = computed(() => appStore.apartmentStatsByProject[projectId.value] ?? null);
+const buildingsCount = computed(() => projectStats.value?.edificios ?? projectBuildings.value.length);
 
 const projectApartments = computed(() => appStore.detailedUnits);
 const layoutUnits = computed(() => projectBuildings.value.flatMap((building) =>
@@ -329,7 +331,7 @@ const effectiveUnits = computed(() => {
   }));
 });
 
-const statusCounts = computed(() => {
+const calculatedStatusCounts = computed(() => {
   const counts: Record<DashboardStatus, number> = {
     available: 0,
     delivered: 0,
@@ -346,7 +348,19 @@ const statusCounts = computed(() => {
   return counts;
 });
 
-const totalUnits = computed(() => effectiveUnits.value.length);
+const statusCounts = computed(() => {
+  const fallback = calculatedStatusCounts.value;
+  if (!projectStats.value) return fallback;
+  return {
+    ...fallback,
+    sold: projectStats.value.vendida,
+    delivered: projectStats.value.unidadesEntregadas,
+    financing: projectStats.value.unidadesConSaldo,
+    inspection: projectStats.value.unidadesEnInspeccion
+  };
+});
+
+const totalUnits = computed(() => projectStats.value?.totalUnidades ?? effectiveUnits.value.length);
 
 const topCards = computed(() => {
   const delivered = statusCounts.value.delivered;
@@ -356,47 +370,16 @@ const topCards = computed(() => {
   const available = statusCounts.value.available;
   const totalBalance = effectiveUnits.value.reduce((sum, unit) => sum + (unit.adeudado || 0), 0);
   const deliveredRate = totalUnits.value > 0 ? Math.round((delivered / totalUnits.value) * 100) : 0;
+  const availableObservation = projectStats.value?.disponiblesObservacion ?? (available + observation);
 
   return [
     { label: 'Total unidades', value: totalUnits.value, subtext: `En ${buildingsCount.value} edificios`, icon: 'bi-grid-3x3-gap', colorClass: 'bg-blue-soft', subColor: 'text-slate-400' },
     { label: 'Entregadas', value: delivered, subtext: totalUnits.value > 0 ? `${deliveredRate}% del total` : 'Sin datos', icon: 'bi-check-circle', colorClass: 'bg-green-soft', subColor: 'text-green-600' },
     { label: 'Con saldo', value: financing, subtext: `Balance: RD$ ${(totalBalance / 1000000).toFixed(1)}M`, icon: 'bi-bank', colorClass: 'bg-blue-soft', subColor: 'text-blue-600' },
-    { label: 'En inspeccion', value: inspection, subtext: 'Pendientes de entrega', icon: 'bi-search', colorClass: 'bg-cyan-soft', subColor: 'text-slate-400' },
-    { label: 'Disponibles / observacion', value: available + observation, subtext: `${observation} en observacion`, icon: 'bi-exclamation-triangle', colorClass: 'bg-red-soft', subColor: 'text-red-500' }
+    { label: 'En inspeccion', value: inspection, subtext: 'En proceso de revision', icon: 'bi-search', colorClass: 'bg-cyan-soft', subColor: 'text-slate-400' },
+    { label: 'Disponibles / observacion', value: availableObservation, subtext: `${observation} en observacion`, icon: 'bi-exclamation-triangle', colorClass: 'bg-red-soft', subColor: 'text-red-500' }
   ];
 });
-
-const parseDateValue = (value: unknown): Date | null => {
-  if (value === null || value === undefined || value === '') return null;
-
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    // Excel serial date (days since 1899-12-30)
-    if (value > 20000) {
-      const ms = Math.round((value - 25569) * 86400 * 1000);
-      const date = new Date(ms);
-      return Number.isNaN(date.getTime()) ? null : date;
-    }
-    const unix = new Date(value);
-    return Number.isNaN(unix.getTime()) ? null : unix;
-  }
-
-  const raw = String(value).trim();
-  if (!raw) return null;
-
-  const nativeParsed = new Date(raw);
-  if (!Number.isNaN(nativeParsed.getTime())) return nativeParsed;
-
-  const slash = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
-  if (slash) {
-    const day = Number(slash[1]);
-    const month = Number(slash[2]) - 1;
-    const year = Number(slash[3].length === 2 ? `20${slash[3]}` : slash[3]);
-    const custom = new Date(year, month, day);
-    return Number.isNaN(custom.getTime()) ? null : custom;
-  }
-
-  return null;
-};
 
 const deliveredYears = computed(() => {
   const years = effectiveUnits.value

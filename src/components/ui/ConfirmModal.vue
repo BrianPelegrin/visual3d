@@ -1,6 +1,6 @@
 <template>
-  <div v-if="show" class="modal-overlay d-flex align-items-center justify-content-center">
-    <div class="modal-container bg-white rounded shadow-lg p-4">
+  <div v-if="show" class="modal-overlay d-flex align-items-center justify-content-center" @click.self="$emit('cancel')">
+    <div class="modal-container bg-white rounded shadow-lg p-4" role="dialog" aria-modal="true" :aria-label="title">
       <div class="modal-header border-bottom pb-2 mb-3">
         <h5 class="modal-title text-danger">
           <i class="bi bi-exclamation-triangle-fill me-2"></i>
@@ -19,16 +19,32 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted, onUnmounted } from 'vue';
+
 defineProps<{
   show: boolean;
   title: string;
   message: string;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'confirm'): void;
   (e: 'cancel'): void;
 }>();
+
+const onKeydown = (event: KeyboardEvent) => {
+  if (event.key === 'Escape') {
+    emit('cancel');
+  }
+};
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown);
+});
 </script>
 
 <style scoped>
