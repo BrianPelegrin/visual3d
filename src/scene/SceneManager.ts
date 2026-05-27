@@ -57,6 +57,7 @@ export class SceneManager {
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.05;
+        this.controls.zoomToCursor = true;
 
         // 5. Lights
         this.setupLights();
@@ -221,7 +222,7 @@ export class SceneManager {
             }
 
             // 1. Constants and Positioning
-            const unitHeight = 0.3;
+            const buildingHeight = Math.max(1, Number(bld.dimensions.height) || 1);
             const padding = 0.03;
             const baseHeight = 0.2;
             const roofHeight = 0.15;
@@ -238,8 +239,9 @@ export class SceneManager {
             });
 
             const maxFloor = Math.max(1, ...normalizedUnits.map((item) => item.floor));
-            const floorStep = unitHeight + padding;
-            const stackHeight = maxFloor * floorStep;
+            const stackHeight = buildingHeight;
+            const floorStep = stackHeight / maxFloor;
+            const unitHeight = Math.max(0.05, floorStep - padding);
 
             // We set the group Y so the bottom of the base sits at 0
             const fullY = (stackHeight / 2) + baseHeight;
@@ -329,6 +331,7 @@ export class SceneManager {
             const normalizeText = (value: unknown) => String(value ?? '').trim().toLowerCase();
             const isUnitHighlighted = (unit: any) => {
                 if (!visualFilters) return true;
+                if (Array.isArray(visualFilters.detailedUnitIds) && visualFilters.detailedUnitIds.length > 0 && !visualFilters.detailedUnitIds.includes(unit.detailedUnitId)) return false;
                 if (visualFilters.status && unit.status !== visualFilters.status) return false;
                 if (visualFilters.bank && normalizeText(unit.bank) !== normalizeText(visualFilters.bank)) return false;
                 if (visualFilters.hasDebt !== null && !!unit.hasDebt !== visualFilters.hasDebt) return false;

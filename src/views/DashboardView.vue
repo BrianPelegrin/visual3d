@@ -23,6 +23,47 @@
         </div>
       </div>
 
+      <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4 dashboard-filter-card">
+        <div class="row g-3 align-items-end">
+          <div class="col-xl-4 col-md-5">
+            <label class="filter-label-v2">Filtrar por propiedad</label>
+            <select v-model="dashboardFilter.field" class="form-select filter-control">
+              <option value="">Selecciona una propiedad</option>
+              <option v-for="option in apartmentFilterOptions" :key="option.key" :value="option.key">
+                {{ option.label }}
+              </option>
+            </select>
+          </div>
+
+          <div class="col-xl-5 col-md-5">
+            <label class="filter-label-v2">Valor</label>
+            <select v-if="selectedFilterType === 'boolean'" v-model="dashboardFilter.value" class="form-select filter-control" :disabled="!dashboardFilter.field">
+              <option value="">Todos</option>
+              <option value="true">Si</option>
+              <option value="false">No</option>
+            </select>
+            <input
+              v-else
+              v-model="dashboardFilter.value"
+              class="form-control filter-control"
+              :disabled="!dashboardFilter.field"
+              :type="filterInputType"
+              :placeholder="filterPlaceholder"
+            />
+          </div>
+
+          <div class="col-xl-3 col-md-2 d-flex align-items-end gap-2">
+            <button class="btn btn-white filter-clear-btn w-100" :disabled="!hasDashboardFilterActive" @click="clearDashboardFilter">
+              <i class="bi bi-x-circle me-2"></i>Limpiar
+            </button>
+          </div>
+        </div>
+        <div v-if="hasDashboardFilterActive" class="filter-summary mt-3">
+          <i class="bi bi-funnel-fill me-2"></i>
+          Mostrando {{ filteredProjectApartments.length }} de {{ projectApartments.length }} apartamentos
+        </div>
+      </div>
+
       <div class="row g-4 mb-4">
         <div v-for="card in topCards" :key="card.label" class="col-xl col-md-4 col-sm-6">
           <div class="card border-0 shadow-sm rounded-4 h-100 p-3 stat-card-v2">
@@ -43,7 +84,7 @@
       </div>
 
       <div class="row g-4 mb-4">
-        <div class="col-xl-9">
+        <div class="col-xl-9 col-12">
           <div class="card border-0 shadow-sm rounded-4 overflow-hidden main-3d-card">
             <div class="viewport-wrapper bg-slate-50">
               <div v-if="layoutNotice" class="layout-notice" :class="layoutNoticeTone">
@@ -54,7 +95,7 @@
                 <i class="bi bi-pin-angle-fill me-1"></i>
                 {{ selectedUnitSummary }}
               </div>
-              <Viewport3D hideUI />
+              <Viewport3D hideUI :visible-detailed-unit-ids="visibleDetailedUnitIds" />
               <ColorGuideModal :show="showColorGuide" @close="showColorGuide = false" />
               <div class="viewport-legend">
                 <button class="legend-help-btn" @click="showColorGuide = true">
@@ -70,7 +111,7 @@
           </div>
         </div>
 
-        <div class="col-xl-3">
+        <div class="col-xl-3 col-12">
           <div class="card border-0 shadow-sm rounded-4 p-4 h-100 bg-white">
             <div class="d-flex justify-content-between align-items-center mb-4">
               <h5 class="fw-bold text-slate-900 mb-0">Edificios</h5>
@@ -134,11 +175,11 @@
         <div class="col-xl-4 col-md-6">
           <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100">
             <h5 class="fw-bold text-slate-900 mb-4">Distribucion por estado</h5>
-            <div class="d-flex align-items-center justify-content-center h-100 donut-layout gap-3">
-              <div class="chart-panel chart-panel-donut">
-                <Doughnut :data="distributionChartData" :options="distributionChartOptions" />
+            <div class="d-flex align-items-center justify-content-center h-100 distribution-layout gap-3">
+              <div class="chart-panel chart-panel-distribution">
+                <Bar :data="distributionChartData" :options="distributionChartOptions" />
               </div>
-              <div class="donut-legend d-flex flex-column gap-2 ms-4">
+              <div class="distribution-legend d-flex flex-column gap-2 ms-4">
                 <div v-for="segment in distributionSegments" :key="segment.label" class="legend-item-v2 d-flex align-items-center gap-2">
                   <div class="dot-v2" :style="{ background: segment.color }"></div>
                   <span class="smaller-text text-slate-500">{{ segment.label }}</span>
@@ -201,7 +242,8 @@ import type { Unit, DetailedUnit } from '../models/types';
 import Viewport3D from '../components/Viewport3D.vue';
 import ColorGuideModal from '../components/ui/ColorGuideModal.vue';
 import { parseDateValue } from '../utils/normalizers';
-import { Bar, Doughnut } from 'vue-chartjs';
+import { Bar } from 'vue-chartjs';
+import { UNIT_ESTADO_COLORS } from '../scene/RulesEngine';
 import {
   Chart as ChartJS,
   ArcElement,
@@ -216,6 +258,8 @@ ChartJS.register(ArcElement, BarElement, CategoryScale, LinearScale, Tooltip, Le
 
 type DashboardStatus = 'available' | 'delivered' | 'financing' | 'inspection' | 'sold' | 'observation';
 type StatusMeta = { label: string; color: string; statusClass: string };
+type ApartmentFilterType = 'string' | 'number' | 'boolean' | 'date';
+type ApartmentFilterOption = { key: keyof DetailedUnit; label: string; type: ApartmentFilterType };
 
 const STATUS_META: Record<DashboardStatus, StatusMeta> = {
   delivered: { label: 'Entregada', color: '#22c55e', statusClass: 'status-green' },
@@ -229,13 +273,122 @@ const STATUS_META: Record<DashboardStatus, StatusMeta> = {
 const route = useRoute();
 const projectId = computed(() => String(route.params.id ?? ''));
 const showColorGuide = ref(false);
+const dashboardFilter = ref<{ field: keyof DetailedUnit | ''; value: string }>({
+  field: '',
+  value: ''
+});
+
+const apartmentFilterOptions: ApartmentFilterOption[] = [
+  { key: 'id', label: 'ID', type: 'number' },
+  { key: 'codUnidad', label: 'Codigo unidad', type: 'string' },
+  { key: 'edificio', label: 'Edificio', type: 'string' },
+  { key: 'unidad', label: 'Unidad', type: 'string' },
+  { key: 'metraje', label: 'Metraje', type: 'number' },
+  { key: 'estado', label: 'Estado', type: 'string' },
+  { key: 'nombre', label: 'Nombre', type: 'string' },
+  { key: 'telefono', label: 'Telefono', type: 'string' },
+  { key: 'correo', label: 'Correo', type: 'string' },
+  { key: 'cedula', label: 'Cedula', type: 'string' },
+  { key: 'precio', label: 'Precio', type: 'number' },
+  { key: 'inicial', label: 'Inicial', type: 'number' },
+  { key: 'inicialDolar', label: 'Inicial dolar', type: 'number' },
+  { key: 'pagado', label: 'Pagado', type: 'number' },
+  { key: 'adeudado', label: 'Adeudado', type: 'number' },
+  { key: 'fechaCompletaInicial', label: 'Fecha completa inicial', type: 'date' },
+  { key: 'fechaInicioVaciados', label: 'Fecha inicio vaciados', type: 'date' },
+  { key: 'fechaEntregaInspeccion', label: 'Fecha entrega inspeccion', type: 'date' },
+  { key: 'fechaLegal', label: 'Fecha legal', type: 'date' },
+  { key: 'fechaGobierno', label: 'Fecha gobierno', type: 'date' },
+  { key: 'fechaMicelaneos', label: 'Fecha micelaneos', type: 'date' },
+  { key: 'fechaInspeccion1', label: 'Fecha inspeccion 1', type: 'date' },
+  { key: 'fechaInspeccion2', label: 'Fecha inspeccion 2', type: 'date' },
+  { key: 'fechaFormaPago', label: 'Fecha forma pago', type: 'date' },
+  { key: 'iniciadoVaciados', label: 'Iniciado vaciados', type: 'boolean' },
+  { key: 'enInspeccion', label: 'En inspeccion', type: 'boolean' },
+  { key: 'inspeccion1', label: 'Inspeccion 1', type: 'boolean' },
+  { key: 'inspeccion2', label: 'Inspeccion 2', type: 'boolean' },
+  { key: 'legal', label: 'Legal', type: 'boolean' },
+  { key: 'gobierno', label: 'Gobierno', type: 'boolean' },
+  { key: 'micelaneos', label: 'Micelaneos', type: 'boolean' },
+  { key: 'titulo', label: 'Titulo', type: 'boolean' },
+  { key: 'responsableLegal', label: 'Responsable legal', type: 'string' },
+  { key: 'responsableGobierno', label: 'Responsable gobierno', type: 'string' },
+  { key: 'responsableMicelaneos', label: 'Responsable micelaneos', type: 'string' },
+  { key: 'formaPago', label: 'Forma pago', type: 'string' },
+  { key: 'banco', label: 'Banco', type: 'string' },
+  { key: 'saldo', label: 'Saldo', type: 'boolean' },
+  { key: 'entregada', label: 'Entregada', type: 'boolean' },
+  { key: 'descargadaDGII', label: 'Descargada DGII', type: 'boolean' }
+];
 
 const project = computed(() => appStore.projects.find((p) => p.id === projectId.value));
 const projectBuildings = computed(() => appStore.buildings.filter((b) => b.projectId === projectId.value));
 const projectStats = computed(() => appStore.apartmentStatsByProject[projectId.value] ?? null);
-const buildingsCount = computed(() => projectStats.value?.edificios ?? projectBuildings.value.length);
+const buildingsCount = computed(() => {
+  if (hasDashboardFilterActive.value) {
+    return new Set(filteredProjectApartments.value.map((apartment) => apartment.edificio).filter(Boolean)).size;
+  }
+  return projectStats.value?.edificios ?? projectBuildings.value.length;
+});
 
 const projectApartments = computed(() => appStore.detailedUnits);
+const selectedFilterOption = computed(() =>
+  apartmentFilterOptions.find((option) => option.key === dashboardFilter.value.field) ?? null
+);
+const selectedFilterType = computed<ApartmentFilterType>(() => selectedFilterOption.value?.type ?? 'string');
+const filterInputType = computed(() => {
+  if (selectedFilterType.value === 'number') return 'number';
+  if (selectedFilterType.value === 'date') return 'date';
+  return 'text';
+});
+const filterPlaceholder = computed(() => {
+  if (!dashboardFilter.value.field) return 'Selecciona una propiedad primero';
+  if (selectedFilterType.value === 'number') return 'Introduce un numero';
+  if (selectedFilterType.value === 'date') return 'Selecciona una fecha';
+  return 'Escribe para filtrar';
+});
+const hasDashboardFilterActive = computed(() => Boolean(dashboardFilter.value.field && dashboardFilter.value.value !== ''));
+const normalizeFilterText = (value: unknown) => String(value ?? '')
+  .trim()
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase();
+
+const matchesDashboardFilter = (apartment: DetailedUnit) => {
+  if (!hasDashboardFilterActive.value || !dashboardFilter.value.field) return true;
+
+  const option = selectedFilterOption.value;
+  if (!option) return true;
+
+  const rawValue = apartment[option.key];
+  const filterValue = dashboardFilter.value.value;
+
+  if (option.type === 'boolean') {
+    return rawValue === (filterValue === 'true');
+  }
+
+  if (option.type === 'number') {
+    const numericFilter = Number(filterValue);
+    const numericValue = Number(rawValue);
+    return Number.isFinite(numericFilter) && Number.isFinite(numericValue) && numericValue === numericFilter;
+  }
+
+  if (option.type === 'date') {
+    const rawDate = parseDateValue(rawValue as string | null);
+    if (!rawDate) return false;
+    return rawDate.toISOString().slice(0, 10) === filterValue;
+  }
+
+  return normalizeFilterText(rawValue).includes(normalizeFilterText(filterValue));
+};
+
+const filteredProjectApartments = computed(() => {
+  if (!hasDashboardFilterActive.value) return projectApartments.value;
+  return projectApartments.value.filter(matchesDashboardFilter);
+});
+const visibleDetailedUnitIds = computed(() =>
+  hasDashboardFilterActive.value ? filteredProjectApartments.value.map((apartment) => apartment.id) : null
+);
 const layoutUnits = computed(() => projectBuildings.value.flatMap((building) =>
   building.units.map((unit) => ({
     ...unit,
@@ -308,8 +461,8 @@ const findUnitIdForApartment = (apartment: DetailedUnit): string | null => {
 };
 
 const effectiveUnits = computed(() => {
-  if (projectApartments.value.length > 0) {
-    return projectApartments.value.map((apartment) => ({
+  if (filteredProjectApartments.value.length > 0 || projectApartments.value.length > 0) {
+    return filteredProjectApartments.value.map((apartment) => ({
       id: `apt-${apartment.id}`,
       unitId: findUnitIdForApartment(apartment),
       buildingName: apartment.edificio || 'N/A',
@@ -350,6 +503,7 @@ const calculatedStatusCounts = computed(() => {
 
 const statusCounts = computed(() => {
   const fallback = calculatedStatusCounts.value;
+  if (hasDashboardFilterActive.value) return fallback;
   if (!projectStats.value) return fallback;
   return {
     ...fallback,
@@ -360,24 +514,23 @@ const statusCounts = computed(() => {
   };
 });
 
-const totalUnits = computed(() => projectStats.value?.totalUnidades ?? effectiveUnits.value.length);
+const totalUnits = computed(() => {
+  if (hasDashboardFilterActive.value) return effectiveUnits.value.length;
+  return projectStats.value?.totalUnidades ?? effectiveUnits.value.length;
+});
 
 const topCards = computed(() => {
-  const delivered = statusCounts.value.delivered;
-  const financing = statusCounts.value.financing;
+  const sold = statusCounts.value.sold;
   const inspection = statusCounts.value.inspection;
-  const observation = statusCounts.value.observation;
   const available = statusCounts.value.available;
-  const totalBalance = effectiveUnits.value.reduce((sum, unit) => sum + (unit.adeudado || 0), 0);
-  const deliveredRate = totalUnits.value > 0 ? Math.round((delivered / totalUnits.value) * 100) : 0;
-  const availableObservation = projectStats.value?.disponiblesObservacion ?? (available + observation);
+  const soldRate = totalUnits.value > 0 ? Math.round((sold / totalUnits.value) * 100) : 0;
+  const availableObservation = hasDashboardFilterActive.value ? available : (projectStats.value?.disponiblesObservacion ?? available);
 
   return [
     { label: 'Total unidades', value: totalUnits.value, subtext: `En ${buildingsCount.value} edificios`, icon: 'bi-grid-3x3-gap', colorClass: 'bg-blue-soft', subColor: 'text-slate-400' },
-    { label: 'Entregadas', value: delivered, subtext: totalUnits.value > 0 ? `${deliveredRate}% del total` : 'Sin datos', icon: 'bi-check-circle', colorClass: 'bg-green-soft', subColor: 'text-green-600' },
-    { label: 'Con saldo', value: financing, subtext: `Balance: RD$ ${(totalBalance / 1000000).toFixed(1)}M`, icon: 'bi-bank', colorClass: 'bg-blue-soft', subColor: 'text-blue-600' },
-    { label: 'En inspeccion', value: inspection, subtext: 'En proceso de revision', icon: 'bi-search', colorClass: 'bg-cyan-soft', subColor: 'text-slate-400' },
-    { label: 'Disponibles / observacion', value: availableObservation, subtext: `${observation} en observacion`, icon: 'bi-exclamation-triangle', colorClass: 'bg-red-soft', subColor: 'text-red-500' }
+    { label: 'Vendidas', value: sold, subtext: totalUnits.value > 0 ? `${soldRate}% del total` : 'Sin datos', icon: 'bi-bag-check', colorClass: 'bg-indigo-soft', subColor: 'text-indigo-600' },
+    { label: 'Unidades Listas', value: inspection, subtext: `Unidades Listas ${inspection} de ${totalUnits.value}`, icon: 'bi-clipboard-check', colorClass: 'bg-green-soft', subColor: 'text-green-600' },
+    { label: 'Disponibles', value: availableObservation, subtext: `Disponibles ${availableObservation} de ${totalUnits.value}`, icon: 'bi-house-door', colorClass: 'bg-amber-soft', subColor: 'text-amber-600' }
   ];
 });
 
@@ -451,21 +604,15 @@ const buildingStats = computed(() => {
 });
 
 const distributionSegments = computed(() => ([
-  { label: STATUS_META.delivered.label, count: statusCounts.value.delivered, color: STATUS_META.delivered.color },
-  { label: STATUS_META.financing.label, count: statusCounts.value.financing, color: STATUS_META.financing.color },
   { label: STATUS_META.inspection.label, count: statusCounts.value.inspection, color: STATUS_META.inspection.color },
   { label: STATUS_META.sold.label, count: statusCounts.value.sold, color: STATUS_META.sold.color },
-  { label: STATUS_META.observation.label, count: statusCounts.value.observation, color: STATUS_META.observation.color },
-  { label: STATUS_META.available.label, count: statusCounts.value.available, color: STATUS_META.available.color }
+  { label: STATUS_META.available.label, count: hasDashboardFilterActive.value ? statusCounts.value.available : (projectStats.value?.disponiblesObservacion ?? statusCounts.value.available), color: STATUS_META.available.color }
 ]));
 
 const viewportLegendSegments = computed(() => ([
-  { label: STATUS_META.delivered.label, color: STATUS_META.delivered.color, outline: false },
-  { label: STATUS_META.financing.label, color: STATUS_META.financing.color, outline: false },
-  { label: STATUS_META.inspection.label, color: STATUS_META.inspection.color, outline: false },
-  { label: STATUS_META.sold.label, color: STATUS_META.sold.color, outline: false },
-  { label: STATUS_META.observation.label, color: STATUS_META.observation.color, outline: false },
-  { label: STATUS_META.available.label, color: '#f8fafc', outline: true }
+  { label: UNIT_ESTADO_COLORS.vendido.label, color: UNIT_ESTADO_COLORS.vendido.colorCss, outline: false },
+  { label: UNIT_ESTADO_COLORS.disponible.label, color: UNIT_ESTADO_COLORS.disponible.colorCss, outline: true },
+  { label: UNIT_ESTADO_COLORS.intercambio.label, color: UNIT_ESTADO_COLORS.intercambio.colorCss, outline: false }
 ]));
 
 const deliveryChartData = computed(() => ({
@@ -499,22 +646,34 @@ const distributionChartData = computed(() => ({
   datasets: [{
     data: distributionSegments.value.map((segment) => segment.count),
     backgroundColor: distributionSegments.value.map((segment) => segment.color),
-    borderColor: '#ffffff',
-    borderWidth: 2
+    borderRadius: 8,
+    borderSkipped: false,
+    maxBarThickness: 24
   }]
 }));
 
 const distributionChartOptions = computed(() => ({
+  indexAxis: 'y' as const,
   responsive: true,
   maintainAspectRatio: false,
   animation: { duration: 650, easing: 'easeOutQuart' as const },
-  cutout: '62%',
   plugins: {
     legend: { display: false },
     tooltip: {
       callbacks: {
-        label: (ctx: any) => `${ctx.label}: ${ctx.parsed}`
+        label: (ctx: any) => `${ctx.label}: ${ctx.parsed.x}`
       }
+    }
+  },
+  scales: {
+    x: {
+      beginAtZero: true,
+      ticks: { precision: 0, color: '#94a3b8', font: { size: 11 } },
+      grid: { color: '#e2e8f0' }
+    },
+    y: {
+      grid: { display: false },
+      ticks: { color: '#64748b', font: { size: 11, weight: 700 } }
     }
   }
 }));
@@ -557,12 +716,21 @@ const handleActivityClick = (unitId: string | null) => {
   selectUnit(unitId);
 };
 
+const clearDashboardFilter = () => {
+  dashboardFilter.value = { field: '', value: '' };
+};
+
 onMounted(() => {
   setAppMode('view');
 });
 
+watch(() => dashboardFilter.value.field, () => {
+  dashboardFilter.value.value = '';
+});
+
 watch(projectId, (newId) => {
   if (!newId) return;
+  clearDashboardFilter();
   selectProject(newId);
 }, { immediate: true });
 </script>
@@ -584,6 +752,8 @@ watch(projectId, (newId) => {
 .text-green-600 { color: #16a34a; }
 .text-red-500 { color: #ef4444; }
 .text-blue-600 { color: #2563eb; }
+.text-indigo-600 { color: #4f46e5; }
+.text-amber-600 { color: #d97706; }
 .bg-blue-600 { background: #2563eb; }
 .bg-blue-200 { background: #bfdbfe; }
 .bg-blue-100 { background: #dbeafe; }
@@ -592,6 +762,8 @@ watch(projectId, (newId) => {
 .bg-green-soft { background: #f0fdf4; color: #22c55e; }
 .bg-cyan-soft { background: #ecfeff; color: #06b6d4; }
 .bg-red-soft { background: #fef2f2; color: #ef4444; }
+.bg-indigo-soft { background: #eef2ff; color: #6366f1; }
+.bg-amber-soft { background: #fffbeb; color: #d97706; }
 
 .fw-800 { font-weight: 800; }
 .ls-1 { letter-spacing: 0.05em; }
@@ -621,6 +793,51 @@ watch(projectId, (newId) => {
   color: #1d4ed8;
   background-color: #eff6ff;
   font-weight: 700;
+}
+
+.dashboard-filter-card {
+  border: 1px solid #e2e8f0 !important;
+}
+
+.filter-label-v2 {
+  display: block;
+  margin-bottom: 6px;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.filter-control {
+  min-height: 42px;
+  border-color: #dbe3ef;
+  border-radius: 12px;
+  color: #1e293b;
+  font-weight: 650;
+}
+
+.filter-control:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 0.2rem rgba(59, 130, 246, 0.12);
+}
+
+.filter-clear-btn {
+  min-height: 42px;
+  border-radius: 12px;
+}
+
+.filter-summary {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.78rem;
+  font-weight: 800;
 }
 
 .stat-card-v2 {
@@ -742,7 +959,7 @@ watch(projectId, (newId) => {
 .bld-accent { width: 4px; height: 16px; border-radius: 2px; }
 .dot-v2 { width: 10px; height: 10px; border-radius: 3px; }
 
-.donut-layout {
+.distribution-layout {
   gap: 12px;
 }
 
@@ -752,26 +969,9 @@ watch(projectId, (newId) => {
   height: 220px;
 }
 
-.chart-panel-donut {
-  max-width: 220px;
+.chart-panel-distribution {
+  min-width: 0;
   height: 220px;
-}
-
-.donut-conic {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-}
-
-.donut-hole {
-  position: absolute;
-  inset: 24px;
-  background: #ffffff;
-  border-radius: 50%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
 }
 
 .card-empty {
@@ -855,14 +1055,18 @@ watch(projectId, (newId) => {
 
 @media (max-width: 992px) {
   .main-3d-card {
-    height: 460px;
+    height: 520px;
   }
 
-  .donut-layout {
+  .building-progress-list {
+    max-height: 260px;
+  }
+
+  .distribution-layout {
     flex-direction: column;
   }
 
-  .donut-legend {
+  .distribution-legend {
     margin-left: 0 !important;
     width: 100%;
   }

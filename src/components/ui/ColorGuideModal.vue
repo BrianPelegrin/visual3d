@@ -1,10 +1,10 @@
 <template>
   <div v-if="show" class="guide-overlay" @click.self="emit('close')">
-    <div class="guide-modal" role="dialog" aria-modal="true" aria-label="Guía de colores">
+    <div class="guide-modal" role="dialog" aria-modal="true" aria-label="Guia de colores">
       <div class="guide-header">
         <div>
-          <h4 class="mb-1 fw-bold">Guía de Colores 3D</h4>
-          <div class="guide-subtitle">Referencia visual de estados y selección de unidades.</div>
+          <h4 class="mb-1 fw-bold">Guia de Colores 3D</h4>
+          <div class="guide-subtitle">Referencia visual de estados y seleccion de unidades.</div>
         </div>
         <button class="btn-close-sm" @click="emit('close')"><i class="bi bi-x-lg"></i></button>
       </div>
@@ -20,6 +20,7 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue';
+import { UNIT_ESTADO_COLORS } from '../../scene/RulesEngine';
 
 const props = defineProps<{ show: boolean }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
@@ -39,12 +40,9 @@ onUnmounted(() => {
 });
 
 const colorLegend = [
-  { label: 'Disponible', color: '#f8fafc' },
-  { label: 'Entregado', color: '#22c55e' },
-  { label: 'Inspección', color: '#06b6d4' },
-  { label: 'Financiamiento', color: '#3b82f6' },
-  { label: 'Vendido', color: '#6366f1' },
-  { label: 'Observación', color: '#ef4444' },
+  { label: UNIT_ESTADO_COLORS.vendido.label, color: UNIT_ESTADO_COLORS.vendido.colorCss },
+  { label: UNIT_ESTADO_COLORS.disponible.label, color: UNIT_ESTADO_COLORS.disponible.colorCss },
+  { label: UNIT_ESTADO_COLORS.intercambio.label, color: UNIT_ESTADO_COLORS.intercambio.colorCss },
   { label: 'Unidad seleccionada', color: '#f59e0b' }
 ];
 </script>

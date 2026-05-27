@@ -35,8 +35,9 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
-defineProps<{
+const props = defineProps<{
   hideUI?: boolean;
+  visibleDetailedUnitIds?: number[] | null;
 }>();
 import { SceneManager } from '../scene/SceneManager';
 import Toolbar from './ui/Toolbar.vue';
@@ -62,6 +63,10 @@ const selectedExcelFile = ref<File | null>(null);
 let sceneManager: SceneManager | null = null;
 const appMode = computed(() => appStore.appMode);
 const selectedUnitId = computed(() => appStore.selectedUnitId);
+const effectiveVisualFilters = computed(() => ({
+  ...appStore.visualFilters,
+  detailedUnitIds: props.visibleDetailedUnitIds ?? null
+}));
 const projectBuildings = computed(() => {
   if (!appStore.currentProjectId) return [];
   return appStore.buildings.filter((b) => b.projectId === appStore.currentProjectId);
@@ -94,7 +99,7 @@ onMounted(() => {
     sceneManager.dragBuildingsEnabled = appStore.dragBuildingsEnabled;
     sceneManager.start();
 
-    sceneManager.syncBuildings(projectBuildings.value, appStore.visualFilters, selectedUnitId.value);
+    sceneManager.syncBuildings(projectBuildings.value, effectiveVisualFilters.value, selectedUnitId.value);
     applyCurrentBlueprint(currentProject.value?.imagenPlano);
   }
 });
@@ -103,7 +108,7 @@ watch(
   projectBuildings,
   (newBuildings) => {
     if (sceneManager) {
-      sceneManager.syncBuildings(newBuildings, appStore.visualFilters, selectedUnitId.value);
+      sceneManager.syncBuildings(newBuildings, effectiveVisualFilters.value, selectedUnitId.value);
     }
   },
   { deep: true }
@@ -111,9 +116,19 @@ watch(
 
 watch(
   () => appStore.visualFilters,
-  (newFilters) => {
+  () => {
     if (sceneManager) {
-      sceneManager.syncBuildings(projectBuildings.value, newFilters, selectedUnitId.value);
+      sceneManager.syncBuildings(projectBuildings.value, effectiveVisualFilters.value, selectedUnitId.value);
+    }
+  },
+  { deep: true }
+);
+
+watch(
+  () => props.visibleDetailedUnitIds,
+  () => {
+    if (sceneManager) {
+      sceneManager.syncBuildings(projectBuildings.value, effectiveVisualFilters.value, selectedUnitId.value);
     }
   },
   { deep: true }
@@ -121,7 +136,7 @@ watch(
 
 watch(selectedUnitId, () => {
   if (sceneManager) {
-    sceneManager.syncBuildings(projectBuildings.value, appStore.visualFilters, selectedUnitId.value);
+    sceneManager.syncBuildings(projectBuildings.value, effectiveVisualFilters.value, selectedUnitId.value);
   }
 });
 

@@ -12,6 +12,7 @@ export interface Unit {
     codUnidad?: string;
     detailedUnitCode?: string;
     externalUnitCode?: string;
+    estado?: string;
     status: UnitStatus;
     paid: boolean;
     price?: number;

@@ -51,7 +51,7 @@
           </div>
 
           <div class="glass-input-group mt-3">
-            <label class="glass-label">Dimensiones (Ancho, Largo)</label>
+            <label class="glass-label">Dimensiones (Ancho, Largo, Altura)</label>
             <div class="position-inputs">
               <div class="coord-input">
                 <span>Ancho</span>
@@ -60,6 +60,10 @@
               <div class="coord-input">
                 <span>Largo</span>
                 <input type="number" min="1" max="50" step="0.5" v-model.number="buildingDepth" @change="updateDimensions" />
+              </div>
+              <div class="coord-input">
+                <span>Altura</span>
+                <input type="number" min="1" max="120" step="0.5" v-model.number="buildingHeight" @change="updateDimensions" />
               </div>
             </div>
           </div>
@@ -241,6 +245,7 @@ const buildingPositionZ = ref(0);
 const buildingRotationY = ref(0);
 const buildingWidth = ref(3);
 const buildingDepth = ref(3);
+const buildingHeight = ref(8);
 const buildingLayoutCols = ref(2);
 const buildingLayoutRows = ref(2);
 
@@ -260,6 +265,7 @@ watch(selectedBuilding, (val) => {
     buildingRotationY.value = val.rotationY ?? 0;
     buildingWidth.value = val.dimensions.width ?? 3;
     buildingDepth.value = val.dimensions.depth ?? 3;
+    buildingHeight.value = val.dimensions.height ?? 8;
     buildingLayoutCols.value = val.layoutCols ?? 2;
     buildingLayoutRows.value = val.layoutRows ?? 2;
   }
@@ -286,14 +292,16 @@ const updateDimensions = () => {
     if (!selectedBuildingId.value || !selectedBuilding.value) return;
     const width = Math.max(1, Math.min(50, Number(buildingWidth.value) || 1));
     const depth = Math.max(1, Math.min(50, Number(buildingDepth.value) || 1));
+    const height = Math.max(1, Math.min(120, Number(buildingHeight.value) || 1));
     buildingWidth.value = width;
     buildingDepth.value = depth;
+    buildingHeight.value = height;
 
     updateBuilding(selectedBuildingId.value, {
         dimensions: {
             width,
             depth,
-            height: selectedBuilding.value.dimensions.height
+            height
         }
     });
 };

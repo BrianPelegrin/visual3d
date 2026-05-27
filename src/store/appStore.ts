@@ -470,6 +470,7 @@ const applyDetailedUnitToLayoutUnit = (unit: Unit, apartment: DetailedUnit) => {
     unit.codUnidad = apartment.codUnidad || unit.codUnidad;
     unit.detailedUnitCode = apartment.codUnidad || unit.detailedUnitCode;
     unit.externalUnitCode = apartment.codUnidad || unit.externalUnitCode;
+    unit.estado = apartment.estado || unit.estado;
     unit.status = normalizeDetailedUnitStatus(apartment);
     unit.bank = apartment.banco?.trim() || undefined;
     unit.enInspeccion = apartment.enInspeccion ?? undefined;
