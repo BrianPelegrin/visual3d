@@ -45,7 +45,7 @@ export interface Blueprint {
     height: number;
 }
 
-export type UserRole = 'admin' | 'editor' | 'viewer';
+export type UserRole = 'admin' | 'editor' | 'viewer' | 'ventas';
 
 export interface User {
     id: number;
@@ -84,6 +84,7 @@ export interface DetailedUnit {
     adeudado: number | null;
     fechaCompletaInicial: string | null;
     fechaInicioVaciados: string | null;
+    fechaEntrega: string | null;
     fechaEntregaInspeccion: string | null;
     fechaLegal: string | null;
     fechaGobierno: string | null;

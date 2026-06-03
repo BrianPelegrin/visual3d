@@ -10,7 +10,7 @@ const isAuthenticated = computed(() => appStore.isAuthenticated);
 const currentUser = computed(() => appStore.currentUser);
 const showGlobalLoader = computed(() => {
   if (route.path === '/login') return false;
-  return appStore.networkBusyCount > 0 || appStore.isProjectContextLoading;
+  return !route.name || appStore.isAuthInitializing || appStore.networkBusyCount > 0 || appStore.isProjectContextLoading;
 });
 
 const handleLogout = () => {

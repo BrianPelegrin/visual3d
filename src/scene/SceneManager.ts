@@ -570,26 +570,14 @@ export class SceneManager {
         const blueprint = this.scene.getObjectByName('blueprint') as THREE.Mesh | null;
         if (!blueprint) return;
 
-        let targetWidth = this.currentGridSize * 0.8;
-        let targetDepth = this.currentGridSize * 0.8;
-
-        const buildingsGroup = this.scene.getObjectByName('buildingsGroup');
-        if (buildingsGroup && buildingsGroup.children.length > 0) {
-            const bounds = new THREE.Box3().setFromObject(buildingsGroup);
-            const width = bounds.max.x - bounds.min.x;
-            const depth = bounds.max.z - bounds.min.z;
-            if (Number.isFinite(width) && Number.isFinite(depth) && width > 0 && depth > 0) {
-                const padding = 1.15;
-                targetWidth = width * padding;
-                targetDepth = depth * padding;
-            }
-        }
+        const targetWidth = this.currentGridSize * 0.8;
+        const targetDepth = this.currentGridSize * 0.8;
 
         const targetRatio = targetWidth / Math.max(targetDepth, 0.0001);
         let planeWidth: number;
         let planeDepth: number;
 
-        // Cover strategy: keeps buildings inside the blueprint footprint across aspect ratios.
+        // Keep blueprint scale independent from buildings so manual edits do not resize the plan.
         if (this.blueprintAspectRatio > targetRatio) {
             planeDepth = targetDepth;
             planeWidth = planeDepth * this.blueprintAspectRatio;

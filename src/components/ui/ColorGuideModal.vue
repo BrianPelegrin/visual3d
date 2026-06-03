@@ -19,8 +19,10 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue';
 import { onMounted, onUnmounted } from 'vue';
-import { UNIT_ESTADO_COLORS } from '../../scene/RulesEngine';
+import { appStore } from '../../store/appStore';
+import { getEstadoColor, normalizeEstadoKey } from '../../scene/RulesEngine';
 
 const props = defineProps<{ show: boolean }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
@@ -39,12 +41,26 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown);
 });
 
-const colorLegend = [
-  { label: UNIT_ESTADO_COLORS.vendido.label, color: UNIT_ESTADO_COLORS.vendido.colorCss },
-  { label: UNIT_ESTADO_COLORS.disponible.label, color: UNIT_ESTADO_COLORS.disponible.colorCss },
-  { label: UNIT_ESTADO_COLORS.intercambio.label, color: UNIT_ESTADO_COLORS.intercambio.colorCss },
-  { label: 'Unidad seleccionada', color: '#f59e0b' }
-];
+const colorLegend = computed(() => {
+  const states = new Map<string, string>();
+
+  for (const apartment of appStore.detailedUnits) {
+    const label = String(apartment.estado ?? '').trim() || 'Sin estado';
+    const key = normalizeEstadoKey(label) || 'sin_estado';
+    if (!states.has(key)) {
+      states.set(key, label);
+    }
+  }
+
+  const dynamicStates = [...states.values()]
+    .map((label) => ({ label, color: getEstadoColor(label).colorCss }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  return [
+    ...dynamicStates,
+    { label: 'Unidad seleccionada', color: '#f59e0b' }
+  ];
+});
 </script>
 
 <style scoped>

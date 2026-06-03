@@ -1,31 +1,31 @@
 <template>
   <div class="viewport-wrapper">
-    <Toolbar v-if="!hideUI" @blueprint-loaded="onBlueprintLoaded" @excel-selected="onExcelSelected" @add-building="handleAddBuilding" @save-layout="handleSaveLayout" @open-color-guide="showColorGuide = true" />
+    <Toolbar v-if="!hideUI" @blueprint-loaded="onBlueprintLoaded" @generate-from-apartments="onGenerateFromApartments" @add-building="handleAddBuilding" @save-layout="handleSaveLayout" @open-color-guide="showColorGuide = true" />
     <PropertiesPanel v-if="!hideUI" />
     <UnitInfoWindow v-if="!hideUI" />
     <ColorGuideModal :show="showColorGuide" @close="showColorGuide = false" />
     <div ref="canvasContainer" class="canvas-container"></div>
 
-    <div v-if="showExcelPreviewModal" class="excel-modal-overlay" @click.self="cancelExcelGeneration">
-      <div class="excel-modal-card" role="dialog" aria-modal="true" aria-label="Confirmación de generación desde Excel">
+    <div v-if="showLayoutPreviewModal" class="excel-modal-overlay" @click.self="cancelLayoutGeneration">
+      <div class="excel-modal-card" role="dialog" aria-modal="true" aria-label="Confirmacion de generacion desde API">
         <div class="excel-modal-header">
           <h5 class="excel-modal-title">
-            <i class="bi bi-file-earmark-spreadsheet me-2"></i>
-            Generar Desde Excel
+            <i class="bi bi-database-gear me-2"></i>
+            Generar a partir de Apartamentos
           </h5>
         </div>
-        <div v-if="excelPreview" class="excel-modal-body">
+        <div v-if="layoutPreview" class="excel-modal-body">
           <p class="excel-modal-lead">Esta accion reemplazara completamente el layout actual del proyecto.</p>
           <div class="excel-summary-row"><span>Proyecto</span><strong>{{ appStore.currentProjectId ?? '-' }}</strong></div>
-          <div class="excel-summary-row"><span>Hoja detectada</span><strong>{{ excelPreview.sheet }}</strong></div>
-          <div class="excel-summary-row"><span>Layout actual</span><strong>{{ excelPreview.currentBuildings }} edificios / {{ excelPreview.currentUnits }} unidades</strong></div>
-          <div class="excel-summary-row"><span>Layout nuevo</span><strong>{{ excelPreview.buildings }} edificios / {{ excelPreview.units }} unidades</strong></div>
+          <div class="excel-summary-row"><span>Fuente</span><strong>{{ layoutPreview.source }}</strong></div>
+          <div class="excel-summary-row"><span>Layout actual</span><strong>{{ layoutPreview.currentBuildings }} edificios / {{ layoutPreview.currentUnits }} unidades</strong></div>
+          <div class="excel-summary-row"><span>Layout nuevo</span><strong>{{ layoutPreview.buildings }} edificios / {{ layoutPreview.units }} unidades</strong></div>
         </div>
         <div class="excel-modal-footer">
-          <button class="btn btn-secondary" :disabled="isApplyingExcel" @click="cancelExcelGeneration">Cancelar</button>
-          <button class="btn btn-primary" :disabled="isApplyingExcel" @click="confirmExcelGeneration">
-            <i v-if="isApplyingExcel" class="bi bi-arrow-repeat spin me-2"></i>
-            {{ isApplyingExcel ? 'Generando...' : 'Reemplazar Layout' }}
+          <button class="btn btn-secondary" :disabled="isApplyingLayout" @click="cancelLayoutGeneration">Cancelar</button>
+          <button class="btn btn-primary" :disabled="isApplyingLayout" @click="confirmLayoutGeneration">
+            <i v-if="isApplyingLayout" class="bi bi-arrow-repeat spin me-2"></i>
+            {{ isApplyingLayout ? 'Generando...' : 'Reemplazar Layout' }}
           </button>
         </div>
       </div>
@@ -44,10 +44,10 @@ import Toolbar from './ui/Toolbar.vue';
 import PropertiesPanel from './ui/PropertiesPanel.vue';
 import UnitInfoWindow from './ui/UnitInfoWindow.vue';
 import ColorGuideModal from './ui/ColorGuideModal.vue';
-import { appStore, addBuilding, selectBuilding, selectUnit, updateBuildingPosition, saveProjectLayout, generateProjectLayoutFromExcel, previewProjectLayoutFromExcel } from '../store/appStore';
+import { appStore, addBuilding, selectBuilding, selectUnit, updateBuildingPosition, saveProjectLayout, generateProjectLayoutFromApartments, previewProjectLayoutFromApartments } from '../store/appStore';
 
-type ExcelPreview = {
-  sheet: string;
+type LayoutPreview = {
+  source: string;
   buildings: number;
   units: number;
   currentBuildings: number;
@@ -55,11 +55,10 @@ type ExcelPreview = {
 };
 
 const canvasContainer = ref<HTMLElement | null>(null);
-const showExcelPreviewModal = ref(false);
+const showLayoutPreviewModal = ref(false);
 const showColorGuide = ref(false);
-const isApplyingExcel = ref(false);
-const excelPreview = ref<ExcelPreview | null>(null);
-const selectedExcelFile = ref<File | null>(null);
+const isApplyingLayout = ref(false);
+const layoutPreview = ref<LayoutPreview | null>(null);
 let sceneManager: SceneManager | null = null;
 const appMode = computed(() => appStore.appMode);
 const selectedUnitId = computed(() => appStore.selectedUnitId);
@@ -179,33 +178,29 @@ const onBlueprintLoaded = (url: string) => {
   }
 };
 
-const onExcelSelected = async (file: File) => {
-  const preview = await previewProjectLayoutFromExcel(file);
+const onGenerateFromApartments = async () => {
+  const preview = await previewProjectLayoutFromApartments();
   if (!preview) return;
 
-  selectedExcelFile.value = file;
-  excelPreview.value = preview;
-  showExcelPreviewModal.value = true;
+  layoutPreview.value = preview;
+  showLayoutPreviewModal.value = true;
 };
 
-const cancelExcelGeneration = () => {
-  showExcelPreviewModal.value = false;
-  excelPreview.value = null;
-  selectedExcelFile.value = null;
+const cancelLayoutGeneration = () => {
+  showLayoutPreviewModal.value = false;
+  layoutPreview.value = null;
   appStore.currentProjectLayoutStatus = 'ready';
-  appStore.currentProjectLayoutMessage = 'Generacion desde Excel cancelada por el usuario.';
+  appStore.currentProjectLayoutMessage = 'Generacion desde API cancelada por el usuario.';
 };
 
-const confirmExcelGeneration = async () => {
-  if (!selectedExcelFile.value) return;
-  isApplyingExcel.value = true;
+const confirmLayoutGeneration = async () => {
+  isApplyingLayout.value = true;
   try {
-    await generateProjectLayoutFromExcel(selectedExcelFile.value);
+    await generateProjectLayoutFromApartments();
   } finally {
-    isApplyingExcel.value = false;
-    showExcelPreviewModal.value = false;
-    excelPreview.value = null;
-    selectedExcelFile.value = null;
+    isApplyingLayout.value = false;
+    showLayoutPreviewModal.value = false;
+    layoutPreview.value = null;
   }
 };
 
@@ -226,8 +221,8 @@ onUnmounted(() => {
 
 const onModalEscape = (event: KeyboardEvent) => {
   if (event.key !== 'Escape') return;
-  if (showExcelPreviewModal.value && !isApplyingExcel.value) {
-    cancelExcelGeneration();
+  if (showLayoutPreviewModal.value && !isApplyingLayout.value) {
+    cancelLayoutGeneration();
   }
 };
 
@@ -329,3 +324,4 @@ onMounted(() => {
   }
 }
 </style>
+

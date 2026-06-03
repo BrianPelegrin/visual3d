@@ -14,58 +14,22 @@
           </p>
         </div>
         <div class="col-md-4 d-flex flex-wrap justify-content-md-end gap-2 mt-3 mt-md-0">
-          <router-link :to="`/editor/${projectId}`" class="btn btn-white shadow-sm border-0 px-4 py-2 fw-bold">
+          <ExcelLikeFilter
+            :items="projectApartments"
+            @apply="handleDashboardFilterApply"
+            @clear="handleDashboardFilterClear"
+          />
+          <router-link v-if="!isSalesRole" :to="`/editor/${projectId}`" class="btn btn-white shadow-sm border-0 px-4 py-2 fw-bold">
             <i class="bi bi-box-seam me-2"></i>Visualizador 3D
           </router-link>
-          <router-link :to="`/projects/${projectId}/units`" class="btn btn-primary-custom shadow-sm border-0 px-4 py-2 fw-bold">
+          <router-link v-if="!isSalesRole" :to="`/projects/${projectId}/units`" class="btn btn-primary-custom shadow-sm border-0 px-4 py-2 fw-bold">
             <i class="bi bi-file-earmark-text me-2"></i>Ver Unidades
           </router-link>
         </div>
       </div>
 
-      <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4 dashboard-filter-card">
-        <div class="row g-3 align-items-end">
-          <div class="col-xl-4 col-md-5">
-            <label class="filter-label-v2">Filtrar por propiedad</label>
-            <select v-model="dashboardFilter.field" class="form-select filter-control">
-              <option value="">Selecciona una propiedad</option>
-              <option v-for="option in apartmentFilterOptions" :key="option.key" :value="option.key">
-                {{ option.label }}
-              </option>
-            </select>
-          </div>
-
-          <div class="col-xl-5 col-md-5">
-            <label class="filter-label-v2">Valor</label>
-            <select v-if="selectedFilterType === 'boolean'" v-model="dashboardFilter.value" class="form-select filter-control" :disabled="!dashboardFilter.field">
-              <option value="">Todos</option>
-              <option value="true">Si</option>
-              <option value="false">No</option>
-            </select>
-            <input
-              v-else
-              v-model="dashboardFilter.value"
-              class="form-control filter-control"
-              :disabled="!dashboardFilter.field"
-              :type="filterInputType"
-              :placeholder="filterPlaceholder"
-            />
-          </div>
-
-          <div class="col-xl-3 col-md-2 d-flex align-items-end gap-2">
-            <button class="btn btn-white filter-clear-btn w-100" :disabled="!hasDashboardFilterActive" @click="clearDashboardFilter">
-              <i class="bi bi-x-circle me-2"></i>Limpiar
-            </button>
-          </div>
-        </div>
-        <div v-if="hasDashboardFilterActive" class="filter-summary mt-3">
-          <i class="bi bi-funnel-fill me-2"></i>
-          Mostrando {{ filteredProjectApartments.length }} de {{ projectApartments.length }} apartamentos
-        </div>
-      </div>
-
       <div class="row g-4 mb-4">
-        <div v-for="card in topCards" :key="card.label" class="col-xl col-md-4 col-sm-6">
+        <div v-for="card in visibleTopCards" :key="card.label" :class="isSalesRole ? 'col-xl-3 col-lg-4 col-md-6' : 'col-xl col-md-4 col-sm-6'">
           <div class="card border-0 shadow-sm rounded-4 h-100 p-3 stat-card-v2">
             <div class="d-flex justify-content-between mb-3">
               <span class="text-uppercase ls-1 fw-bold text-slate-400 smaller-text">{{ card.label }}</span>
@@ -84,7 +48,7 @@
       </div>
 
       <div class="row g-4 mb-4">
-        <div class="col-xl-9 col-12">
+        <div :class="isSalesRole ? 'col-xl-8 col-12' : 'col-xl-9 col-12'">
           <div class="card border-0 shadow-sm rounded-4 overflow-hidden main-3d-card">
             <div class="viewport-wrapper bg-slate-50">
               <div v-if="layoutNotice" class="layout-notice" :class="layoutNoticeTone">
@@ -97,7 +61,7 @@
               </div>
               <Viewport3D hideUI :visible-detailed-unit-ids="visibleDetailedUnitIds" />
               <ColorGuideModal :show="showColorGuide" @close="showColorGuide = false" />
-              <div class="viewport-legend">
+              <div v-if="!isSalesRole" class="viewport-legend">
                 <button class="legend-help-btn" @click="showColorGuide = true">
                   <i class="bi bi-info-circle me-1"></i>
                   Ayuda de colores
@@ -111,20 +75,37 @@
           </div>
         </div>
 
-        <div class="col-xl-3 col-12">
+        <div :class="isSalesRole ? 'col-xl-4 col-12' : 'col-xl-3 col-12'">
           <div class="card border-0 shadow-sm rounded-4 p-4 h-100 bg-white">
             <div class="d-flex justify-content-between align-items-center mb-4">
               <h5 class="fw-bold text-slate-900 mb-0">Edificios</h5>
-              <span class="text-primary-custom smaller-text fw-bold">{{ buildingStats.length }}</span>
+              <span class="text-primary-custom smaller-text fw-bold">{{ filteredBuildingStats.length }} / {{ buildingStats.length }}</span>
             </div>
-            <p class="text-slate-400 smaller-text mb-4">Resumen de avance por edificio</p>
+            <p class="text-slate-400 smaller-text mb-3">Resumen de avance por edificio</p>
+
+            <div class="building-search mb-4">
+              <i class="bi bi-search"></i>
+              <input
+                v-model="buildingSearch"
+                type="search"
+                placeholder="Buscar edificio..."
+                aria-label="Buscar edificio"
+              >
+              <button v-if="buildingSearch" type="button" @click="buildingSearch = ''" aria-label="Limpiar busqueda">
+                <i class="bi bi-x-lg"></i>
+              </button>
+            </div>
 
             <div v-if="buildingStats.length === 0" class="card-empty">
               No hay edificios o unidades para mostrar.
             </div>
 
+            <div v-else-if="filteredBuildingStats.length === 0" class="card-empty">
+              No hay edificios que coincidan con la busqueda.
+            </div>
+
             <div v-else class="building-progress-list d-flex flex-column gap-4">
-              <div v-for="bld in buildingStats" :key="bld.id" class="bld-row">
+              <div v-for="bld in filteredBuildingStats" :key="bld.id" class="bld-row">
                 <div class="d-flex align-items-center justify-content-between mb-2">
                   <div class="d-flex align-items-center gap-2">
                     <div class="bld-accent" :style="{ background: bld.color }"></div>
@@ -133,7 +114,7 @@
                   <div class="d-flex align-items-center gap-3">
                     <div class="text-end">
                       <div class="fw-bold text-slate-800 small">{{ bld.delivered }}</div>
-                      <div class="smaller-text text-slate-400">ENTREG.</div>
+                      <div class="smaller-text text-slate-400">VEND.</div>
                     </div>
                     <div class="text-end">
                       <div class="fw-bold text-orange-500 small">{{ bld.progress }}%</div>
@@ -150,7 +131,7 @@
         </div>
       </div>
 
-      <div class="row g-4 mb-4">
+      <div v-if="!isSalesRole" class="row g-4 mb-4">
         <div class="col-xl-4 col-md-6">
           <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100">
             <div class="d-flex justify-content-between align-items-center mb-4 gap-2 flex-wrap">
@@ -237,13 +218,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { appStore, selectProject, selectUnit, setAppMode } from '../store/appStore';
+import { appStore, selectProject, selectUnit, setAppMode, isSales } from '../store/appStore';
 import type { Unit, DetailedUnit } from '../models/types';
 import Viewport3D from '../components/Viewport3D.vue';
 import ColorGuideModal from '../components/ui/ColorGuideModal.vue';
+import ExcelLikeFilter from '../components/ui/ExcelLikeFilter.vue';
 import { parseDateValue } from '../utils/normalizers';
 import { Bar } from 'vue-chartjs';
-import { UNIT_ESTADO_COLORS } from '../scene/RulesEngine';
+import { getEstadoColor, normalizeEstadoKey } from '../scene/RulesEngine';
 import {
   Chart as ChartJS,
   ArcElement,
@@ -258,8 +240,7 @@ ChartJS.register(ArcElement, BarElement, CategoryScale, LinearScale, Tooltip, Le
 
 type DashboardStatus = 'available' | 'delivered' | 'financing' | 'inspection' | 'sold' | 'observation';
 type StatusMeta = { label: string; color: string; statusClass: string };
-type ApartmentFilterType = 'string' | 'number' | 'boolean' | 'date';
-type ApartmentFilterOption = { key: keyof DetailedUnit; label: string; type: ApartmentFilterType };
+type DistributionSegment = { label: string; count: number; color: string };
 
 const STATUS_META: Record<DashboardStatus, StatusMeta> = {
   delivered: { label: 'Entregada', color: '#22c55e', statusClass: 'status-green' },
@@ -273,118 +254,27 @@ const STATUS_META: Record<DashboardStatus, StatusMeta> = {
 const route = useRoute();
 const projectId = computed(() => String(route.params.id ?? ''));
 const showColorGuide = ref(false);
-const dashboardFilter = ref<{ field: keyof DetailedUnit | ''; value: string }>({
-  field: '',
-  value: ''
-});
-
-const apartmentFilterOptions: ApartmentFilterOption[] = [
-  { key: 'id', label: 'ID', type: 'number' },
-  { key: 'codUnidad', label: 'Codigo unidad', type: 'string' },
-  { key: 'edificio', label: 'Edificio', type: 'string' },
-  { key: 'unidad', label: 'Unidad', type: 'string' },
-  { key: 'metraje', label: 'Metraje', type: 'number' },
-  { key: 'estado', label: 'Estado', type: 'string' },
-  { key: 'nombre', label: 'Nombre', type: 'string' },
-  { key: 'telefono', label: 'Telefono', type: 'string' },
-  { key: 'correo', label: 'Correo', type: 'string' },
-  { key: 'cedula', label: 'Cedula', type: 'string' },
-  { key: 'precio', label: 'Precio', type: 'number' },
-  { key: 'inicial', label: 'Inicial', type: 'number' },
-  { key: 'inicialDolar', label: 'Inicial dolar', type: 'number' },
-  { key: 'pagado', label: 'Pagado', type: 'number' },
-  { key: 'adeudado', label: 'Adeudado', type: 'number' },
-  { key: 'fechaCompletaInicial', label: 'Fecha completa inicial', type: 'date' },
-  { key: 'fechaInicioVaciados', label: 'Fecha inicio vaciados', type: 'date' },
-  { key: 'fechaEntregaInspeccion', label: 'Fecha entrega inspeccion', type: 'date' },
-  { key: 'fechaLegal', label: 'Fecha legal', type: 'date' },
-  { key: 'fechaGobierno', label: 'Fecha gobierno', type: 'date' },
-  { key: 'fechaMicelaneos', label: 'Fecha micelaneos', type: 'date' },
-  { key: 'fechaInspeccion1', label: 'Fecha inspeccion 1', type: 'date' },
-  { key: 'fechaInspeccion2', label: 'Fecha inspeccion 2', type: 'date' },
-  { key: 'fechaFormaPago', label: 'Fecha forma pago', type: 'date' },
-  { key: 'iniciadoVaciados', label: 'Iniciado vaciados', type: 'boolean' },
-  { key: 'enInspeccion', label: 'En inspeccion', type: 'boolean' },
-  { key: 'inspeccion1', label: 'Inspeccion 1', type: 'boolean' },
-  { key: 'inspeccion2', label: 'Inspeccion 2', type: 'boolean' },
-  { key: 'legal', label: 'Legal', type: 'boolean' },
-  { key: 'gobierno', label: 'Gobierno', type: 'boolean' },
-  { key: 'micelaneos', label: 'Micelaneos', type: 'boolean' },
-  { key: 'titulo', label: 'Titulo', type: 'boolean' },
-  { key: 'responsableLegal', label: 'Responsable legal', type: 'string' },
-  { key: 'responsableGobierno', label: 'Responsable gobierno', type: 'string' },
-  { key: 'responsableMicelaneos', label: 'Responsable micelaneos', type: 'string' },
-  { key: 'formaPago', label: 'Forma pago', type: 'string' },
-  { key: 'banco', label: 'Banco', type: 'string' },
-  { key: 'saldo', label: 'Saldo', type: 'boolean' },
-  { key: 'entregada', label: 'Entregada', type: 'boolean' },
-  { key: 'descargadaDGII', label: 'Descargada DGII', type: 'boolean' }
-];
+const dashboardFilteredApartments = ref<DetailedUnit[] | null>(null);
+const activeDashboardFilterCount = ref(0);
+const buildingSearch = ref('');
+const isSalesRole = computed(() => isSales());
 
 const project = computed(() => appStore.projects.find((p) => p.id === projectId.value));
 const projectBuildings = computed(() => appStore.buildings.filter((b) => b.projectId === projectId.value));
 const projectStats = computed(() => appStore.apartmentStatsByProject[projectId.value] ?? null);
 const buildingsCount = computed(() => {
-  if (hasDashboardFilterActive.value) {
+  if (hasDashboardFilterResult.value) {
     return new Set(filteredProjectApartments.value.map((apartment) => apartment.edificio).filter(Boolean)).size;
   }
   return projectStats.value?.edificios ?? projectBuildings.value.length;
 });
 
 const projectApartments = computed(() => appStore.detailedUnits);
-const selectedFilterOption = computed(() =>
-  apartmentFilterOptions.find((option) => option.key === dashboardFilter.value.field) ?? null
-);
-const selectedFilterType = computed<ApartmentFilterType>(() => selectedFilterOption.value?.type ?? 'string');
-const filterInputType = computed(() => {
-  if (selectedFilterType.value === 'number') return 'number';
-  if (selectedFilterType.value === 'date') return 'date';
-  return 'text';
-});
-const filterPlaceholder = computed(() => {
-  if (!dashboardFilter.value.field) return 'Selecciona una propiedad primero';
-  if (selectedFilterType.value === 'number') return 'Introduce un numero';
-  if (selectedFilterType.value === 'date') return 'Selecciona una fecha';
-  return 'Escribe para filtrar';
-});
-const hasDashboardFilterActive = computed(() => Boolean(dashboardFilter.value.field && dashboardFilter.value.value !== ''));
-const normalizeFilterText = (value: unknown) => String(value ?? '')
-  .trim()
-  .normalize('NFD')
-  .replace(/[\u0300-\u036f]/g, '')
-  .toLowerCase();
-
-const matchesDashboardFilter = (apartment: DetailedUnit) => {
-  if (!hasDashboardFilterActive.value || !dashboardFilter.value.field) return true;
-
-  const option = selectedFilterOption.value;
-  if (!option) return true;
-
-  const rawValue = apartment[option.key];
-  const filterValue = dashboardFilter.value.value;
-
-  if (option.type === 'boolean') {
-    return rawValue === (filterValue === 'true');
-  }
-
-  if (option.type === 'number') {
-    const numericFilter = Number(filterValue);
-    const numericValue = Number(rawValue);
-    return Number.isFinite(numericFilter) && Number.isFinite(numericValue) && numericValue === numericFilter;
-  }
-
-  if (option.type === 'date') {
-    const rawDate = parseDateValue(rawValue as string | null);
-    if (!rawDate) return false;
-    return rawDate.toISOString().slice(0, 10) === filterValue;
-  }
-
-  return normalizeFilterText(rawValue).includes(normalizeFilterText(filterValue));
-};
+const hasDashboardFilterActive = computed(() => activeDashboardFilterCount.value > 0);
+const hasDashboardFilterResult = computed(() => dashboardFilteredApartments.value !== null);
 
 const filteredProjectApartments = computed(() => {
-  if (!hasDashboardFilterActive.value) return projectApartments.value;
-  return projectApartments.value.filter(matchesDashboardFilter);
+  return dashboardFilteredApartments.value ?? projectApartments.value;
 });
 const visibleDetailedUnitIds = computed(() =>
   hasDashboardFilterActive.value ? filteredProjectApartments.value.map((apartment) => apartment.id) : null
@@ -467,9 +357,10 @@ const effectiveUnits = computed(() => {
       unitId: findUnitIdForApartment(apartment),
       buildingName: apartment.edificio || 'N/A',
       displayName: apartment.codUnidad || `${apartment.edificio}-${apartment.unidad}`,
+      estado: apartment.estado,
       status: normalizeStatus(apartment),
       adeudado: apartment.adeudado || 0,
-      deliveryDate: apartment.fechaEntregaInspeccion
+      deliveryDate: apartment.fechaEntrega ?? apartment.fechaEntregaInspeccion
     }));
   }
 
@@ -478,6 +369,7 @@ const effectiveUnits = computed(() => {
     unitId: unit.id,
     buildingName: unit.buildingName,
     displayName: unit.name,
+    estado: unit.estado,
     status: getLayoutUnitStatus(unit),
     adeudado: unit.balance || 0,
     deliveryDate: unit.deliveryDate || null
@@ -503,7 +395,7 @@ const calculatedStatusCounts = computed(() => {
 
 const statusCounts = computed(() => {
   const fallback = calculatedStatusCounts.value;
-  if (hasDashboardFilterActive.value) return fallback;
+  if (hasDashboardFilterResult.value) return fallback;
   if (!projectStats.value) return fallback;
   return {
     ...fallback,
@@ -515,16 +407,27 @@ const statusCounts = computed(() => {
 });
 
 const totalUnits = computed(() => {
-  if (hasDashboardFilterActive.value) return effectiveUnits.value.length;
+  if (hasDashboardFilterResult.value) return effectiveUnits.value.length;
   return projectStats.value?.totalUnidades ?? effectiveUnits.value.length;
 });
 
+const soldUnitsCount = computed(() => {
+  const sourceApartments = filteredProjectApartments.value;
+  if (sourceApartments.length > 0 || projectApartments.value.length > 0) {
+    return sourceApartments.filter((apartment) => normalizeEstadoKey(apartment.estado) === 'vendido').length;
+  }
+
+  return statusCounts.value.sold;
+});
+
 const topCards = computed(() => {
-  const sold = statusCounts.value.sold;
+  const sold = soldUnitsCount.value;
   const inspection = statusCounts.value.inspection;
-  const available = statusCounts.value.available;
+  const available = hasDashboardFilterResult.value
+    ? filteredProjectApartments.value.filter((apartment) => normalizeEstadoKey(apartment.estado) === 'disponible').length
+    : statusCounts.value.available;
   const soldRate = totalUnits.value > 0 ? Math.round((sold / totalUnits.value) * 100) : 0;
-  const availableObservation = hasDashboardFilterActive.value ? available : (projectStats.value?.disponiblesObservacion ?? available);
+  const availableObservation = hasDashboardFilterResult.value ? available : (projectStats.value?.disponiblesObservacion ?? available);
 
   return [
     { label: 'Total unidades', value: totalUnits.value, subtext: `En ${buildingsCount.value} edificios`, icon: 'bi-grid-3x3-gap', colorClass: 'bg-blue-soft', subColor: 'text-slate-400' },
@@ -532,6 +435,11 @@ const topCards = computed(() => {
     { label: 'Unidades Listas', value: inspection, subtext: `Unidades Listas ${inspection} de ${totalUnits.value}`, icon: 'bi-clipboard-check', colorClass: 'bg-green-soft', subColor: 'text-green-600' },
     { label: 'Disponibles', value: availableObservation, subtext: `Disponibles ${availableObservation} de ${totalUnits.value}`, icon: 'bi-house-door', colorClass: 'bg-amber-soft', subColor: 'text-amber-600' }
   ];
+});
+
+const visibleTopCards = computed(() => {
+  if (!isSalesRole.value) return topCards.value;
+  return topCards.value.filter((card) => card.label === 'Total unidades');
 });
 
 const deliveredYears = computed(() => {
@@ -592,28 +500,78 @@ const buildingStats = computed(() => {
     );
     if (!matched) continue;
     matched.total += 1;
-    if (unit.status === 'delivered') {
+    if (normalizeEstadoKey(unit.estado) === 'vendido') {
       matched.delivered += 1;
     }
   }
 
-  return [...map.values()].map((building) => ({
+  const stats = [...map.values()].map((building) => ({
     ...building,
     progress: building.total > 0 ? Math.round((building.delivered / building.total) * 100) : 0
   }));
+
+  if (hasDashboardFilterResult.value) {
+    return stats.sort((a, b) =>
+      b.total - a.total
+      || b.delivered - a.delivered
+      || b.progress - a.progress
+      || a.name.localeCompare(b.name)
+    );
+  }
+
+  return stats;
 });
 
-const distributionSegments = computed(() => ([
-  { label: STATUS_META.inspection.label, count: statusCounts.value.inspection, color: STATUS_META.inspection.color },
-  { label: STATUS_META.sold.label, count: statusCounts.value.sold, color: STATUS_META.sold.color },
-  { label: STATUS_META.available.label, count: hasDashboardFilterActive.value ? statusCounts.value.available : (projectStats.value?.disponiblesObservacion ?? statusCounts.value.available), color: STATUS_META.available.color }
-]));
+const normalizeSearchText = (value: string) => value
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase()
+  .trim();
 
-const viewportLegendSegments = computed(() => ([
-  { label: UNIT_ESTADO_COLORS.vendido.label, color: UNIT_ESTADO_COLORS.vendido.colorCss, outline: false },
-  { label: UNIT_ESTADO_COLORS.disponible.label, color: UNIT_ESTADO_COLORS.disponible.colorCss, outline: true },
-  { label: UNIT_ESTADO_COLORS.intercambio.label, color: UNIT_ESTADO_COLORS.intercambio.colorCss, outline: false }
-]));
+const filteredBuildingStats = computed(() => {
+  const query = normalizeSearchText(buildingSearch.value);
+  if (!query) return buildingStats.value;
+
+  return buildingStats.value.filter((building) =>
+    normalizeSearchText(building.name).includes(query)
+  );
+});
+
+const distributionSegments = computed<DistributionSegment[]>(() => {
+  const sourceApartments = filteredProjectApartments.value;
+  const grouped = new Map<string, { label: string; count: number }>();
+
+  for (const apartment of sourceApartments) {
+    const rawEstado = String(apartment.estado ?? '').trim();
+    const key = normalizeEstadoKey(rawEstado) || 'sin_estado';
+    const current = grouped.get(key);
+
+    if (current) {
+      current.count += 1;
+    } else {
+      grouped.set(key, {
+        label: rawEstado || 'Sin estado',
+        count: 1
+      });
+    }
+  }
+
+  return [...grouped.entries()]
+    .map(([_key, item]) => ({
+      label: item.label,
+      count: item.count,
+      color: getEstadoColor(item.label).colorCss
+    }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+});
+
+const viewportLegendSegments = computed(() =>
+  distributionSegments.value.map((segment) => ({
+    label: segment.label,
+    color: segment.color,
+    outline: normalizeEstadoKey(segment.label) === 'disponible'
+  }))
+);
 
 const deliveryChartData = computed(() => ({
   labels: ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'],
@@ -621,7 +579,7 @@ const deliveryChartData = computed(() => ({
     label: 'Entregadas',
     data: monthlyDeliveries.value,
     backgroundColor: '#3b82f6',
-    borderRadius: 6,
+    borderRadius: 2,
     borderSkipped: false,
     maxBarThickness: 20
   }]
@@ -646,7 +604,7 @@ const distributionChartData = computed(() => ({
   datasets: [{
     data: distributionSegments.value.map((segment) => segment.count),
     backgroundColor: distributionSegments.value.map((segment) => segment.color),
-    borderRadius: 8,
+    borderRadius: 2,
     borderSkipped: false,
     maxBarThickness: 24
   }]
@@ -716,21 +674,27 @@ const handleActivityClick = (unitId: string | null) => {
   selectUnit(unitId);
 };
 
-const clearDashboardFilter = () => {
-  dashboardFilter.value = { field: '', value: '' };
+const resetDashboardFilterResult = () => {
+  dashboardFilteredApartments.value = null;
+  activeDashboardFilterCount.value = 0;
+};
+
+const handleDashboardFilterApply = (result: { filteredItems: unknown[]; activeFilters: { field: string; value: string }[] }) => {
+  dashboardFilteredApartments.value = result.filteredItems as DetailedUnit[];
+  activeDashboardFilterCount.value = result.activeFilters.length;
+};
+
+const handleDashboardFilterClear = () => {
+  resetDashboardFilterResult();
 };
 
 onMounted(() => {
   setAppMode('view');
 });
 
-watch(() => dashboardFilter.value.field, () => {
-  dashboardFilter.value.value = '';
-});
-
 watch(projectId, (newId) => {
   if (!newId) return;
-  clearDashboardFilter();
+  resetDashboardFilterResult();
   selectProject(newId);
 }, { immediate: true });
 </script>
@@ -954,6 +918,52 @@ watch(projectId, (newId) => {
   max-height: 420px;
   overflow-y: auto;
   padding-right: 8px;
+}
+
+.building-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #94a3b8;
+}
+
+.building-search input {
+  min-width: 0;
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: #334155;
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.building-search input::placeholder {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.building-search button {
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  padding: 0;
+}
+
+.building-search button:hover {
+  background: #e2e8f0;
+  color: #334155;
 }
 
 .bld-accent { width: 4px; height: 16px; border-radius: 2px; }

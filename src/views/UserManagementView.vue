@@ -44,6 +44,7 @@
               <option value="all">Todos los roles</option>
               <option value="admin">Administradores</option>
               <option value="editor">Editores</option>
+              <option value="ventas">Ventas</option>
               <option value="viewer">Visitantes</option>
             </select>
           </div>
@@ -176,6 +177,7 @@
             <select v-model="form.role" class="form-select" required>
               <option value="admin">Administrador</option>
               <option value="editor">Editor</option>
+              <option value="ventas">Ventas</option>
               <option value="viewer">Visitante</option>
             </select>
           </div>
@@ -264,6 +266,7 @@ const translateRole = (role: UserRole) => {
   const roles: Record<string, string> = {
     admin: 'Administrador',
     editor: 'Editor',
+    ventas: 'Ventas',
     viewer: 'Visitante'
   };
   return roles[role] || role;
@@ -273,6 +276,7 @@ const getRoleClass = (role: UserRole) => {
   switch (role) {
     case 'admin': return 'role-red';
     case 'editor': return 'role-blue';
+    case 'ventas': return 'role-green';
     case 'viewer': return 'role-slate';
     default: return 'role-slate';
   }
@@ -440,6 +444,7 @@ const doDelete = async () => {
 }
 .role-red { background: #fef2f2; color: #ef4444; border: 1px solid #fee2e2; }
 .role-blue { background: #eff6ff; color: #3b82f6; border: 1px solid #dbeafe; }
+.role-green { background: #f0fdf4; color: #16a34a; border: 1px solid #dcfce7; }
 .role-slate { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
 
 /* Modal */

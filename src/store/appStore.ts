@@ -32,6 +32,7 @@ type AuthSession = {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5153/api';
 const AUTH_STORAGE_KEY = 'auth_session';
 const AUTH_RETURN_TO_KEY = 'auth_return_to';
+const INITIAL_FETCH_TIMEOUT_MS = 12000;
 let authInitializationPromise: Promise<void> | null = null;
 let projectsLoadPromise: Promise<Project[]> | null = null;
 let usersLoadPromise: Promise<User[]> | null = null;
@@ -76,6 +77,14 @@ const readAuthSession = (): AuthSession | null => {
     }
 };
 
+const normalizeUserRole = (value: unknown): User['role'] => {
+    const role = String(value ?? '').trim().toLowerCase();
+    if (role === 'admin') return 'admin';
+    if (role === 'editor') return 'editor';
+    if (role === 'ventas' || role === 'sales') return 'ventas';
+    return 'viewer';
+};
+
 const normalizeUserResponse = (payload: unknown): User | null => {
     if (!payload || typeof payload !== 'object') return null;
 
@@ -101,7 +110,8 @@ const normalizeUserResponse = (payload: unknown): User | null => {
         if (normalizedId === null) return null;
         return {
             ...(candidate.user as User),
-            id: normalizedId
+            id: normalizedId,
+            role: normalizeUserRole(candidate.user.role)
         };
     }
 
@@ -109,7 +119,8 @@ const normalizeUserResponse = (payload: unknown): User | null => {
     if (normalizedId !== null && candidate.name && candidate.email && candidate.role) {
         return {
             ...(candidate as User),
-            id: normalizedId
+            id: normalizedId,
+            role: normalizeUserRole(candidate.role)
         };
     }
 
@@ -122,6 +133,20 @@ const getAuthHeaders = () => {
         headers.Authorization = `Bearer ${appStore.accessToken}`;
     }
     return headers;
+};
+
+const fetchWithTimeout = async (input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = INITIAL_FETCH_TIMEOUT_MS) => {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+        return await fetch(input, {
+            ...init,
+            signal: controller.signal
+        });
+    } finally {
+        window.clearTimeout(timeoutId);
+    }
 };
 
 const isUnauthorizedResponse = (response: Response) => response.status === 401;
@@ -154,6 +179,16 @@ export const consumeAuthReturnTo = () => {
 const syncProjectsState = (projects: Project[]) => {
     appStore.projects = projects;
     appStore.availableProjectIds = projects.map(project => project.id);
+};
+
+const upsertProjectState = (project: Project) => {
+    const index = appStore.projects.findIndex(item => item.id === project.id);
+    if (index >= 0) {
+        appStore.projects[index] = project;
+    } else {
+        appStore.projects.push(project);
+    }
+    appStore.availableProjectIds = [...new Set([...appStore.availableProjectIds, project.id])];
 };
 
 const syncProjectLayoutState = (projectId: string, buildings: Building[], gridSize?: number) => {
@@ -190,9 +225,16 @@ const normalizeProjectsResponse = (payload: unknown): Project[] => {
 
 const normalizeUsersResponse = (payload: unknown): User[] => {
     const source = payload as ApiUsersResponse & { users?: User[] };
-    if (Array.isArray(source)) return source;
-    if (!source || typeof source !== 'object') return [];
-    return source.users ?? source.data ?? source.items ?? source.result ?? [];
+    const users = Array.isArray(source)
+        ? source
+        : (!source || typeof source !== 'object')
+            ? []
+            : (source.users ?? source.data ?? source.items ?? source.result ?? []);
+
+    return users.map((user) => ({
+        ...user,
+        role: normalizeUserRole(user.role)
+    }));
 };
 
 const normalizeStringListResponse = (payload: unknown): string[] => {
@@ -219,11 +261,8 @@ const normalizeProjectResponse = (payload: unknown): Project | null => {
         return null;
     }
 
-    const candidate = payload as { project?: Project } & Partial<Project>;
-
-    if (candidate.project && candidate.project.id) {
-        return candidate.project;
-    }
+    const source = payload as { project?: Project; data?: Project; item?: Project; result?: Project } & Partial<Project>;
+    const candidate = source.project ?? source.data ?? source.item ?? source.result ?? source;
 
     if (candidate.id && candidate.nombre && candidate.direccion && candidate.provincia && candidate.municipio && candidate.imagenPlano !== undefined) {
         return candidate as Project;
@@ -397,6 +436,7 @@ const normalizeDetailedUnitsResponse = (payload: unknown): DetailedUnit[] => {
             adeudado,
             fechaCompletaInicial: (get('fechaCompletaInicial', 'FechaCompletaInicial') ?? null) as string | null,
             fechaInicioVaciados: (get('fechaInicioVaciados', 'FechaInicioVaciados') ?? null) as string | null,
+            fechaEntrega: (get('fechaEntrega', 'FechaEntrega') ?? null) as string | null,
             fechaEntregaInspeccion: (get('fechaEntregaInspeccion', 'FechaEntregaInspeccion') ?? null) as string | null,
             fechaLegal: (get('fechaLegal', 'FechaLegal') ?? null) as string | null,
             fechaGobierno: (get('fechaGobierno', 'FechaGobierno') ?? null) as string | null,
@@ -527,6 +567,7 @@ type ExcelApartmentRow = {
     codUnidad: string;
     edificio: string;
     unidad: string;
+    estado: string;
     floor: number;
     status: UnitStatus;
     paid: boolean;
@@ -694,6 +735,7 @@ const parseExcelSheetRows = (rows: unknown[][]): ExcelApartmentRow[] => {
             codUnidad,
             edificio,
             unidad,
+            estado: estadoIdx >= 0 ? String(row[estadoIdx] ?? '').trim() : '',
             floor: inferFloorFromUnit(unidad),
             status,
             paid,
@@ -765,6 +807,7 @@ const buildLayoutFromExcelRows = (projectId: string, rows: ExcelApartmentRow[], 
                     codUnidad: row.codUnidad,
                     detailedUnitCode: row.codUnidad,
                     externalUnitCode: row.codUnidad,
+                    estado: row.estado,
                     status: row.status,
                     paid: row.paid,
                     price: row.price,
@@ -806,6 +849,47 @@ const buildLayoutFromExcelRows = (projectId: string, rows: ExcelApartmentRow[], 
     return buildings;
 };
 
+const apartmentToLayoutRow = (apartment: DetailedUnit): ExcelApartmentRow => {
+    const balance = apartment.adeudado ?? undefined;
+    return {
+        codUnidad: apartment.codUnidad || `${apartment.edificio}-${apartment.unidad}`.trim(),
+        edificio: apartment.edificio || 'N/A',
+        unidad: apartment.unidad || apartment.codUnidad || String(apartment.id),
+        estado: apartment.estado || '',
+        floor: inferFloorFromUnit(apartment.unidad || apartment.codUnidad),
+        status: normalizeDetailedUnitStatus(apartment),
+        paid: typeof apartment.adeudado === 'number'
+            ? apartment.adeudado <= 0
+            : Boolean(apartment.saldo),
+        price: apartment.precio,
+        balance,
+        hasDebt: typeof balance === 'number' ? balance > 0 : undefined,
+        bank: apartment.banco?.trim() || undefined,
+        enInspeccion: apartment.enInspeccion ?? undefined,
+        legal: apartment.legal ?? undefined,
+        titulo: apartment.titulo ?? undefined,
+        descargadaDGII: apartment.descargadaDGII ?? undefined,
+        saldo: apartment.saldo ?? undefined
+    };
+};
+
+const buildLayoutRowsFromApartments = (apartments: DetailedUnit[]) => apartments
+    .filter((apartment) => apartment.edificio || apartment.unidad || apartment.codUnidad)
+    .map(apartmentToLayoutRow);
+
+const getApartmentsForLayoutGeneration = async (projectId: string) => {
+    const cachedApartments = appStore.detailedUnitsByProject[projectId] ?? appStore.detailedUnits;
+    if (cachedApartments.length > 0) {
+        appStore.detailedUnitsByProject[projectId] = cachedApartments;
+        syncCurrentProjectApartments(projectId);
+        return cachedApartments;
+    }
+
+    const loadedApartments = await loadProjectApartments(projectId);
+    syncCurrentProjectApartments(projectId);
+    return loadedApartments;
+};
+
 interface AppState {
     appMode: 'edit' | 'view';
     dragBuildingsEnabled: boolean;
@@ -832,6 +916,7 @@ interface AppState {
     projectsErrorMessage: string;
     apartmentsErrorByProject: Record<string, string>;
     networkBusyCount: number;
+    isAuthInitializing: boolean;
     isProjectContextLoading: boolean;
     visualFilters: {
         status: UnitStatus | null;
@@ -871,6 +956,7 @@ export const appStore = reactive<AppState>({
     projectsErrorMessage: '',
     apartmentsErrorByProject: {},
     networkBusyCount: 0,
+    isAuthInitializing: false,
     isProjectContextLoading: false,
     visualFilters: {
         status: null,
@@ -896,6 +982,7 @@ export const selectProject = (id: string | null) => {
         appStore.currentProjectLayoutMessage = '';
         appStore.isProjectContextLoading = true;
         void Promise.allSettled([
+            loadProject(id),
             loadProjectLayout(id),
             loadProjectApartments(id),
             loadProjectApartmentStats(id)
@@ -938,7 +1025,7 @@ export const addBuilding = (position: { x: number, z: number }) => {
         projectId: appStore.currentProjectId,
         name: `Edificio ${appStore.buildings.length + 1}`,
         position,
-        dimensions: { width: 3, depth: 3, height: 8 }, // 3x3 default
+        dimensions: { width: 4, depth: 4, height: 8 },
         rotationY: 0,
         layoutCols: DEFAULT_LAYOUT_COLS,
         layoutRows: DEFAULT_LAYOUT_ROWS,
@@ -1099,6 +1186,19 @@ export const updateBuilding = (id: string, updates: Partial<Building>) => {
     if (bld) {
         Object.assign(bld, updates);
     }
+};
+
+export const updateCurrentProjectBuildingDimensions = (dimensions: Building['dimensions']) => {
+    if (!appStore.currentProjectId) return 0;
+
+    let updatedCount = 0;
+    appStore.buildings.forEach((building) => {
+        if (building.projectId !== appStore.currentProjectId) return;
+        building.dimensions = { ...dimensions };
+        updatedCount += 1;
+    });
+
+    return updatedCount;
 };
 
 export const updateBuildingPosition = (id: string, position: { x: number, z: number }) => {
@@ -1323,7 +1423,6 @@ export const login = async (email: string, password?: string) => {
         refreshToken: data.refreshToken ?? null
     });
 
-    void loadProjects();
     void loadAvailableProjectIds();
     if (normalizedUser.role === 'admin') {
         void loadUsers();
@@ -1346,6 +1445,7 @@ export const ensureAuthInitialized = async () => {
     }
 
     authInitializationPromise = (async () => {
+        appStore.isAuthInitializing = true;
         beginNetworkActivity();
         const session = readAuthSession();
         if (!session) {
@@ -1355,7 +1455,7 @@ export const ensureAuthInitialized = async () => {
         applyAuthSession(session);
 
         try {
-            const response = await fetch(`${API_BASE_URL}/Auth/me`, {
+            const response = await fetchWithTimeout(`${API_BASE_URL}/Auth/me`, {
                 method: 'GET',
                 headers: {
                     ...(session.accessToken ? { Authorization: `Bearer ${session.accessToken}` } : {})
@@ -1381,13 +1481,13 @@ export const ensureAuthInitialized = async () => {
         }
 
         await Promise.all([
-            loadProjects(),
             loadAvailableProjectIds(),
             ...(appStore.currentUser?.role === 'admin' ? [loadUsers()] : [])
         ]);
     })();
 
     authInitializationPromise = authInitializationPromise.finally(() => {
+        appStore.isAuthInitializing = false;
         endNetworkActivity();
     });
 
@@ -1403,10 +1503,14 @@ export const getUserRole = () => appStore.currentUser?.role || 'viewer';
 export const isAdmin = () => getUserRole() === 'admin';
 export const isEditor = () => getUserRole() === 'editor' || isAdmin();
 export const isViewer = () => getUserRole() === 'viewer';
+export const isSales = () => getUserRole() === 'ventas';
 
 export const canManageUsers = () => isAdmin();
 export const canEditData = () => isEditor();
 export const canDeleteData = () => isAdmin();
+export const canOpenDashboard = () => isAdmin() || isEditor() || isViewer() || isSales();
+export const canOpenEditor = () => isAdmin() || isEditor() || isViewer();
+export const canOpenProjectUnits = () => isAdmin() || isEditor() || isViewer();
 
 export const loadUsers = async () => {
     if (usersLoadPromise) {
@@ -1416,7 +1520,7 @@ export const loadUsers = async () => {
     usersLoadPromise = (async () => {
     beginNetworkActivity();
     try {
-        const response = await fetch(`${API_BASE_URL}/Users`, {
+        const response = await fetchWithTimeout(`${API_BASE_URL}/Users`, {
             headers: {
                 ...getAuthHeaders()
             }
@@ -1457,7 +1561,7 @@ export const loadProjects = async () => {
     appStore.isProjectsLoading = true;
     appStore.projectsErrorMessage = '';
     try {
-        const response = await fetch(`${API_BASE_URL}/Projects`, {
+        const response = await fetchWithTimeout(`${API_BASE_URL}/Projects`, {
             headers: {
                 ...getAuthHeaders()
             }
@@ -1486,6 +1590,36 @@ export const loadProjects = async () => {
     })();
 
     return projectsLoadPromise;
+};
+
+export const loadProject = async (projectId: string) => {
+    beginNetworkActivity();
+    try {
+        const response = await fetchWithTimeout(`${API_BASE_URL}/Projects/${projectId}`, {
+            headers: {
+                ...getAuthHeaders()
+            }
+        });
+
+        if (handleUnauthorizedResponse(response)) {
+            return null;
+        }
+        if (!response.ok) {
+            return appStore.projects.find(project => project.id === projectId) ?? null;
+        }
+
+        const project = normalizeProjectResponse(await response.json());
+        if (!project) {
+            return appStore.projects.find(item => item.id === projectId) ?? null;
+        }
+
+        upsertProjectState(project);
+        return project;
+    } catch (_error) {
+        return appStore.projects.find(project => project.id === projectId) ?? null;
+    } finally {
+        endNetworkActivity();
+    }
 };
 
 export const loadProjectLayout = async (projectId: string) => {
@@ -1676,6 +1810,36 @@ export const generateProjectLayoutFromExcel = async (file: File) => {
     }
 };
 
+export const generateProjectLayoutFromApartments = async () => {
+    const projectId = appStore.currentProjectId;
+    if (!projectId) {
+        appStore.currentProjectLayoutStatus = 'error';
+        appStore.currentProjectLayoutMessage = 'Debes seleccionar un proyecto antes de generar el layout desde la API.';
+        return null;
+    }
+
+    const apartments = await getApartmentsForLayoutGeneration(projectId);
+    const parsedRows = buildLayoutRowsFromApartments(apartments);
+    if (parsedRows.length === 0) {
+        appStore.currentProjectLayoutStatus = 'error';
+        appStore.currentProjectLayoutMessage = 'No hay apartamentos validos para generar el layout desde la API.';
+        return null;
+    }
+
+    const generatedBuildings = buildLayoutFromExcelRows(projectId, parsedRows, apartments);
+    syncProjectLayoutState(projectId, generatedBuildings);
+    appStore.selectedBuildingId = null;
+    appStore.selectedUnitId = null;
+    appStore.currentProjectLayoutStatus = 'ready';
+    appStore.currentProjectLayoutMessage = `Layout generado desde API: ${generatedBuildings.length} edificios y ${parsedRows.length} unidades.`;
+
+    return {
+        source: `Endpoint /Projects/${projectId}/apartments`,
+        buildings: generatedBuildings.length,
+        units: parsedRows.length
+    };
+};
+
 export const previewProjectLayoutFromExcel = async (file: File) => {
     const projectId = appStore.currentProjectId;
     if (!projectId) {
@@ -1721,6 +1885,35 @@ export const previewProjectLayoutFromExcel = async (file: File) => {
         appStore.currentProjectLayoutMessage = 'No se pudo procesar el archivo Excel.';
         return null;
     }
+};
+
+export const previewProjectLayoutFromApartments = async () => {
+    const projectId = appStore.currentProjectId;
+    if (!projectId) {
+        appStore.currentProjectLayoutStatus = 'error';
+        appStore.currentProjectLayoutMessage = 'Debes seleccionar un proyecto antes de generar el layout desde la API.';
+        return null;
+    }
+
+    const apartments = await getApartmentsForLayoutGeneration(projectId);
+    const parsedRows = buildLayoutRowsFromApartments(apartments);
+    if (parsedRows.length === 0) {
+        appStore.currentProjectLayoutStatus = 'error';
+        appStore.currentProjectLayoutMessage = 'No hay apartamentos validos para generar el layout desde la API.';
+        return null;
+    }
+
+    const generatedBuildings = buildLayoutFromExcelRows(projectId, parsedRows, apartments);
+    const projectBuildings = appStore.buildings.filter((building) => building.projectId === projectId);
+    const currentUnits = projectBuildings.reduce((acc, building) => acc + building.units.length, 0);
+
+    return {
+        source: `Endpoint /Projects/${projectId}/apartments`,
+        buildings: generatedBuildings.length,
+        units: parsedRows.length,
+        currentBuildings: projectBuildings.length,
+        currentUnits
+    };
 };
 
 export const saveProjectLayout = async () => {
@@ -1788,7 +1981,7 @@ export const loadAvailableProjectIds = async () => {
     availableProjectIdsLoadPromise = (async () => {
     beginNetworkActivity();
     try {
-        const response = await fetch(`${API_BASE_URL}/Apartamentos/sheets`, {
+        const response = await fetchWithTimeout(`${API_BASE_URL}/Apartamentos/sheets`, {
             headers: {
                 ...getAuthHeaders()
             }

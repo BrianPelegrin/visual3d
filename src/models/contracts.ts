@@ -69,6 +69,8 @@ export interface ApiApartmentRecord {
   FechaCompletaInicial?: string | null;
   fechaInicioVaciados?: string | null;
   FechaInicioVaciados?: string | null;
+  fechaEntrega?: string | null;
+  FechaEntrega?: string | null;
   fechaEntregaInspeccion?: string | null;
   FechaEntregaInspeccion?: string | null;
   fechaLegal?: string | null;

@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import { appStore, ensureAuthInitialized } from '../store/appStore';
+import { appStore, ensureAuthInitialized, isSales } from '../store/appStore';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -51,15 +51,17 @@ router.beforeEach(async (to, _from, next) => {
     next({ name: 'projects' });
   } else if (to.meta.requiresAdmin && appStore.currentUser?.role !== 'admin') {
     next({ name: 'projects' }); 
+  } else if (isSales() && (to.name === 'editor' || to.name === 'project-units')) {
+    const id = to.params.id as string | undefined;
+    next(id ? { name: 'dashboard', params: { id } } : { name: 'projects' });
   } else {
-    // Check for project-specific routes that require a valid ID
+    // Check for project-specific routes that require an ID. Project details are loaded lazily per screen.
     const projectRoutes = ['dashboard', 'editor', 'project-units'];
     if (projectRoutes.includes(to.name as string)) {
       const id = to.params.id as string;
-      const projectExists = appStore.projects.some(p => p.id === id);
       
-      if (!id || !projectExists) {
-        console.warn(`Attempted access to ${String(to.name)} without valid project ID. Redirecting to projects.`);
+      if (!id) {
+        console.warn(`Attempted access to ${String(to.name)} without project ID. Redirecting to projects.`);
         next({ name: 'projects' });
         return;
       }

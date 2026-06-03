@@ -115,17 +115,17 @@
                 </td>
                 <td class="text-end pe-4">
                   <div class="d-flex justify-content-end gap-2">
-                    <button class="btn btn-icon text-blue-500" @click="enterEditMode(prj.id)" title="Editar Modelo 3D">
+                    <button v-if="!re_isSales()" class="btn btn-icon text-blue-500" @click="enterEditMode(prj.id)" title="Editar Modelo 3D">
                       <i class="bi bi-box-seam"></i>
                     </button>
-                    <div class="vr mx-1 opacity-25"></div>
+                    <div v-if="!re_isSales()" class="vr mx-1 opacity-25"></div>
                     <router-link :to="`/dashboard/${prj.id}`" class="btn btn-icon text-emerald-600" title="Ver Dashboard">
                       <i class="bi bi-speedometer2"></i>
                     </router-link>
-                    <router-link :to="`/projects/${prj.id}/units`" class="btn btn-icon text-indigo-600" title="Ver Apartamentos">
+                    <router-link v-if="!re_isSales()" :to="`/projects/${prj.id}/units`" class="btn btn-icon text-indigo-600" title="Ver Apartamentos">
                       <i class="bi bi-houses"></i>
                     </router-link>
-                    <div class="vr mx-1 opacity-25"></div>
+                    <div v-if="re_canEditData() || re_canDeleteData()" class="vr mx-1 opacity-25"></div>
                     <button v-if="re_canEditData()" class="btn btn-icon text-blue-600" @click="openEditModal(prj)" title="Editar Info">
                       <i class="bi bi-pencil-square"></i>
                     </button>
@@ -292,13 +292,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive, watch } from 'vue';
+import { ref, computed, reactive, watch, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { appStore, addProject, updateProject, deleteProject, canEditData, canDeleteData, loadProjects } from '../store/appStore';
+import { appStore, addProject, updateProject, deleteProject, canEditData, canDeleteData, loadProjects, isSales } from '../store/appStore';
 
 // Permission exposure for template
 const re_canEditData = () => canEditData();
 const re_canDeleteData = () => canDeleteData();
+const re_isSales = () => isSales();
 import type { Project } from '../models/types';
 
 const router = useRouter();
@@ -324,6 +325,10 @@ const projectsErrorMessage = computed(() => appStore.projectsErrorMessage);
 const retryProjectsLoad = async () => {
   await loadProjects();
 };
+
+onMounted(() => {
+  void loadProjects();
+});
 
 // Filtered List
 const filteredProjects = computed(() => {

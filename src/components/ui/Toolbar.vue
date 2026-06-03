@@ -37,7 +37,7 @@
 
       <div class="spacer toolbar-desktop-only"></div>
 
-      <div class="toolbar-desktop-only d-flex align-items-center gap-2">
+      <div class="toolbar-desktop-only desktop-controls d-flex align-items-center gap-2">
       <div v-if="appMode === 'edit' && !re_isViewer()" class="control-group d-flex align-items-center gap-2">
         <div class="control-label">
           <i class="bi bi-grid-3x3"></i>
@@ -56,6 +56,39 @@
           <div class="control-label">
             <i class="bi bi-arrows-move"></i>
             <span class="d-none d-lg-inline">Mover</span>
+          </div>
+        </div>
+
+        <div v-if="appMode === 'edit' && re_canEditData()" class="position-relative">
+          <button class="btn-glass-filter" :class="{ active: showGlobalDimensions }" @click="showGlobalDimensions = !showGlobalDimensions" title="Dimensiones globales">
+            <i class="bi bi-rulers"></i>
+            <span class="d-none d-lg-inline">Dimensiones</span>
+          </button>
+
+          <div v-if="showGlobalDimensions" class="global-dimensions-panel shadow-lg p-3 rounded-4">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h6 class="mb-0 fw-bold smaller-text text-uppercase ls-1">Dimensiones Globales</h6>
+              <button class="btn-close-sm" @click="showGlobalDimensions = false"><i class="bi bi-x-lg"></i></button>
+            </div>
+            <p class="global-dimensions-help">Aplica ancho, largo y altura a todos los edificios del proyecto actual.</p>
+            <div class="global-dimensions-grid">
+              <label>
+                <span>Ancho</span>
+                <input type="number" min="1" max="50" step="0.5" v-model.number="globalWidth">
+              </label>
+              <label>
+                <span>Largo</span>
+                <input type="number" min="1" max="50" step="0.5" v-model.number="globalDepth">
+              </label>
+              <label>
+                <span>Alto</span>
+                <input type="number" min="1" max="120" step="0.5" v-model.number="globalHeight">
+              </label>
+            </div>
+            <button class="btn-glass-primary w-100 justify-content-center mt-3" :disabled="projectBuildings.length === 0" @click="applyGlobalDimensions">
+              <i class="bi bi-check2-circle"></i>
+              <span>Aplicar a {{ projectBuildings.length }} edificio{{ projectBuildings.length === 1 ? '' : 's' }}</span>
+            </button>
           </div>
         </div>
 
@@ -148,8 +181,7 @@
             <span>{{ isSaving ? 'Guardando' : 'Guardar' }}</span>
           </button>
           <button class="btn-glass-primary" @click="emit('add-building')"><i class="bi bi-plus-lg"></i><span>Edificio</span></button>
-          <input type="file" ref="excelInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="d-none" @change="onExcelFileChange" />
-          <button class="btn-glass-outline" @click="triggerExcelUpload" title="Generar desde Excel"><i class="bi bi-file-earmark-spreadsheet"></i></button>
+          <button class="btn-glass-outline" @click="emit('generate-from-apartments')" title="Generar a partir de Apartamentos"><i class="bi bi-database-gear"></i></button>
           <input type="file" ref="fileInput" accept="image/png, image/jpeg" class="d-none" @change="onFileChange" />
           <button class="btn-glass-outline" @click="triggerFileUpload" title="Subir Plano"><i class="bi bi-cloud-arrow-up"></i></button>
         </div>
@@ -189,6 +221,31 @@
             <div class="form-check form-switch m-0">
               <input class="form-check-input" type="checkbox" role="switch" :checked="dragBuildingsEnabled" @change="toggleDragBuildings">
             </div>
+          </div>
+        </div>
+
+        <div v-if="appMode === 'edit' && re_canEditData()" class="mobile-section">
+          <div class="mobile-section-title">Dimensiones globales</div>
+          <div class="global-dimensions-card">
+            <p class="global-dimensions-help">Aplica el mismo ancho, largo y alto a todos los edificios.</p>
+            <div class="global-dimensions-grid">
+              <label>
+                <span>Ancho</span>
+                <input type="number" min="1" max="50" step="0.5" v-model.number="globalWidth">
+              </label>
+              <label>
+                <span>Largo</span>
+                <input type="number" min="1" max="50" step="0.5" v-model.number="globalDepth">
+              </label>
+              <label>
+                <span>Alto</span>
+                <input type="number" min="1" max="120" step="0.5" v-model.number="globalHeight">
+              </label>
+            </div>
+            <button class="btn-glass-primary w-100 justify-content-center mt-3" :disabled="projectBuildings.length === 0" @click="applyGlobalDimensions">
+              <i class="bi bi-check2-circle"></i>
+              <span>Aplicar a todos</span>
+            </button>
           </div>
         </div>
 
@@ -237,8 +294,7 @@
           <div class="mobile-actions-grid">
             <button class="btn-glass-save w-100 justify-content-center" :disabled="isSaving" @click="emit('save-layout')"><i class="bi" :class="isSaving ? 'bi-arrow-repeat spin' : 'bi-cloud-check'"></i><span>{{ isSaving ? 'Guardando' : 'Guardar cambios' }}</span></button>
             <button class="btn-glass-primary w-100 justify-content-center" @click="emit('add-building')"><i class="bi bi-plus-lg"></i><span>Agregar edificio</span></button>
-            <input type="file" ref="excelInputMobile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="d-none" @change="onExcelFileChange" />
-            <button class="btn-glass-outline w-100 justify-content-center" @click="triggerExcelUploadMobile"><i class="bi bi-file-earmark-spreadsheet"></i><span>Generar desde Excel</span></button>
+            <button class="btn-glass-outline w-100 justify-content-center" @click="emit('generate-from-apartments')"><i class="bi bi-database-gear"></i><span>Generar a partir de Apartamentos</span></button>
             <input type="file" ref="fileInput" accept="image/png, image/jpeg" class="d-none" @change="onFileChange" />
             <button class="btn-glass-outline w-100 justify-content-center" @click="triggerFileUpload"><i class="bi bi-cloud-arrow-up"></i><span>Subir plano</span></button>
           </div>
@@ -264,19 +320,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
-import { appStore, setAppMode, setGridSize, setDragBuildingsEnabled, canEditData, isViewer, setVisualFilters } from '../../store/appStore';
+import { ref, computed, watch } from 'vue';
+import { appStore, setAppMode, setGridSize, setDragBuildingsEnabled, canEditData, isViewer, setVisualFilters, updateCurrentProjectBuildingDimensions } from '../../store/appStore';
 
 const re_canEditData = () => canEditData();
 const re_isViewer = () => isViewer();
 const fileInput = ref<HTMLInputElement | null>(null);
-const excelInput = ref<HTMLInputElement | null>(null);
-const excelInputMobile = ref<HTMLInputElement | null>(null);
 const mobileMenuOpen = ref(false);
+const showGlobalDimensions = ref(false);
+const globalWidth = ref(4);
+const globalDepth = ref(4);
+const globalHeight = ref(8);
 
 const emit = defineEmits<{
   (e: 'blueprint-loaded', url: string): void;
-  (e: 'excel-selected', file: File): void;
+  (e: 'generate-from-apartments'): void;
   (e: 'add-building'): void;
   (e: 'save-layout'): void;
   (e: 'open-color-guide'): void;
@@ -291,6 +349,31 @@ const projectBuildings = computed(() => appStore.buildings.filter(building => bu
 const totalUnits = computed(() => projectBuildings.value.reduce((acc, building) => acc + building.units.length, 0));
 const linkedUnits = computed(() => projectBuildings.value.reduce((acc, building) => acc + building.units.filter(unit => unit.detailedUnitId !== null).length, 0));
 const unmatchedUnits = computed(() => Math.max(totalUnits.value - linkedUnits.value, 0));
+
+const averageDimensions = computed(() => {
+  if (projectBuildings.value.length === 0) {
+    return { width: 4, depth: 4, height: 8 };
+  }
+
+  const totals = projectBuildings.value.reduce((acc, building) => ({
+    width: acc.width + (Number(building.dimensions.width) || 0),
+    depth: acc.depth + (Number(building.dimensions.depth) || 0),
+    height: acc.height + (Number(building.dimensions.height) || 0)
+  }), { width: 0, depth: 0, height: 0 });
+
+  const count = projectBuildings.value.length;
+  return {
+    width: Number((totals.width / count).toFixed(1)),
+    depth: Number((totals.depth / count).toFixed(1)),
+    height: Number((totals.height / count).toFixed(1))
+  };
+});
+
+watch(averageDimensions, (dimensions) => {
+  globalWidth.value = dimensions.width;
+  globalDepth.value = dimensions.depth;
+  globalHeight.value = dimensions.height;
+}, { immediate: true });
 
 const showFilters = ref(false);
 const banks = computed(() => {
@@ -325,21 +408,23 @@ const updateGridSize = (event: Event) => setGridSize(parseInt((event.target as H
 const updateFilter = (key: string, event: Event) => setVisualFilters({ [key]: ((event.target as HTMLSelectElement).value === '' ? null : (event.target as HTMLSelectElement).value) as any });
 const toggleFilter = (key: string, event: Event) => setVisualFilters({ [key]: (event.target as HTMLInputElement).checked ? true : null });
 const clearAllFilters = () => setVisualFilters({ status: null, bank: null, hasDebt: null, enInspeccion: null, legal: null, titulo: null, descargadaDGII: null, saldo: null });
+const clampDimension = (value: number, min: number, max: number) => Math.max(min, Math.min(max, Number(value) || min));
+const applyGlobalDimensions = () => {
+  const width = clampDimension(globalWidth.value, 1, 50);
+  const depth = clampDimension(globalDepth.value, 1, 50);
+  const height = clampDimension(globalHeight.value, 1, 120);
+  globalWidth.value = width;
+  globalDepth.value = depth;
+  globalHeight.value = height;
+  updateCurrentProjectBuildingDimensions({ width, depth, height });
+  showGlobalDimensions.value = false;
+};
 const triggerFileUpload = () => fileInput.value?.click();
-const triggerExcelUpload = () => excelInput.value?.click();
-const triggerExcelUploadMobile = () => excelInputMobile.value?.click();
 const onFileChange = (event: Event) => {
   const target = event.target as HTMLInputElement;
   const file = target.files?.[0];
   if (!file) return;
   emit('blueprint-loaded', URL.createObjectURL(file));
-  target.value = '';
-};
-const onExcelFileChange = (event: Event) => {
-  const target = event.target as HTMLInputElement;
-  const file = target.files?.[0];
-  if (!file) return;
-  emit('excel-selected', file);
   target.value = '';
 };
 </script>
@@ -394,6 +479,72 @@ const onExcelFileChange = (event: Event) => {
 .btn-close-sm { border: none; background: transparent; color: #94a3b8; cursor: pointer; padding: 4px; }
 .btn-close-sm:hover { color: #f43f5e; }
 
+.global-dimensions-panel {
+  position: absolute;
+  top: calc(100% + 12px);
+  right: -30%;
+  width: 310px;
+  background: rgba(255,255,255,0.96);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.4);
+  z-index: 1200;
+}
+
+.global-dimensions-card {
+  background: rgba(15,23,42,0.04);
+  border: 1px solid rgba(15,23,42,0.08);
+  border-radius: 16px;
+  padding: 12px;
+}
+
+.global-dimensions-help {
+  margin: 0 0 12px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.global-dimensions-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.global-dimensions-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.global-dimensions-grid span {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.global-dimensions-grid input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(15,23,42,0.08);
+  background: rgba(255,255,255,0.72);
+  border-radius: 10px;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 700;
+  outline: none;
+  padding: 8px 9px;
+}
+
+.global-dimensions-grid input:focus {
+  background: #ffffff;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.1);
+}
+
 .btn-glass-primary, .btn-glass-save, .btn-glass-outline { border: none; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; cursor: pointer; transition: all 0.2s; }
 .btn-glass-primary { background: #0f172a; color: white; box-shadow: 0 4px 12px rgba(15,23,42,0.15); }
 .btn-glass-save { background: #22c55e; color: white; box-shadow: 0 4px 12px rgba(34,197,94,0.18); }
@@ -431,6 +582,7 @@ const onExcelFileChange = (event: Event) => {
 .mobile-mode-switcher .mode-btn { flex: 1; justify-content: center; }
 .mobile-control-group { width: 100%; flex-wrap: wrap; }
 .mobile-range-container { width: 100%; justify-content: space-between; }
+.mobile-range-container .glass-range { flex: 1; width: 100%; }
 .mobile-actions-grid { display: grid; gap: 10px; }
 .link-summary-card { background: rgba(15,23,42,0.04); border: 1px solid rgba(15,23,42,0.08); border-radius: 16px; padding: 12px 14px; }
 .link-summary-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0; font-size: 13px; color: #334155; }
@@ -444,17 +596,80 @@ const onExcelFileChange = (event: Event) => {
 
 .toolbar-mobile-only { display: none; }
 .toolbar-desktop-only { display: flex; }
+.desktop-controls {
+  gap: 14px !important;
+}
+.actions-group {
+  gap: 12px !important;
+}
 
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
-@media (max-width: 768px) {
+@media (max-width: 1320px) {
+  .brand-text {
+    display: none;
+  }
+
+  .toolbar-glass {
+    padding: 0 14px;
+  }
+
+  .toolbar-row {
+    gap: 10px !important;
+  }
+
+  .desktop-controls {
+    gap: 8px !important;
+  }
+
+  .actions-group {
+    gap: 8px !important;
+  }
+
+  .mode-btn {
+    padding: 6px 12px;
+  }
+
+  .btn-glass-primary,
+  .btn-glass-save,
+  .btn-glass-outline,
+  .btn-glass-filter {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+}
+
+@media (max-width: 1516px) {
   .brand-text, .header-divider, .toolbar-desktop-only { display: none !important; }
-  .toolbar-mobile-only { display: flex; }
-  .toolbar-glass { left: 68px; right: 12px; padding: 0 12px; }
+
+  .toolbar-mobile-only {
+    display: flex;
+  }
+
+  .toolbar-glass {
+    left: 16px;
+    right: 16px;
+    padding: 0 12px;
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
+  }
+
   .toolbar-row { min-height: 56px; }
   .mobile-panel { display: flex; flex-direction: column; gap: 14px; padding: 0 0 14px; }
-  .filters-panel { position: static; width: 100%; right: auto; top: auto; max-height: none; margin-top: 12px; }
+  .filters-panel,
+  .global-dimensions-panel {
+    position: static;
+    width: 100%;
+    right: auto;
+    top: auto;
+    max-height: none;
+    margin-top: 12px;
+  }
   .mode-status-badge { display: inline-flex; }
+}
+
+@media (max-width: 768px) {
+  .toolbar-glass { left: 68px; right: 12px; }
 }
 
 @media (max-width: 600px) {
