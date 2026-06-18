@@ -33,7 +33,6 @@ const initProject = () => {
     
     if (projectId.value) {
         selectProject(projectId.value);
-        console.log('Editor initialized for project:', projectId.value);
     }
 };
 

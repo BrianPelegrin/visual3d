@@ -45,3 +45,28 @@ html, body {
   border-style: solid;
   border-color: rgba(255, 255, 255, 0.9) transparent transparent transparent;
 }
+
+.text-slate-900 { color: #0f172a; }
+.text-slate-800 { color: #1e293b; }
+.text-slate-700 { color: #334155; }
+.text-slate-500 { color: #64748b; }
+.text-slate-400 { color: #94a3b8; }
+.text-slate-300 { color: #cbd5e1; }
+.text-blue-600 { color: #2563eb; }
+
+.bg-blue-soft {
+  background: #eff6ff;
+  color: #3b82f6;
+}
+
+.bg-blue-600 {
+  background: #2563eb;
+  background-color: #2563eb !important;
+}
+
+.btn-white {
+  background: #ffffff;
+  color: #64748b;
+  font-weight: 600;
+  border: 1px solid #e2e8f0 !important;
+}

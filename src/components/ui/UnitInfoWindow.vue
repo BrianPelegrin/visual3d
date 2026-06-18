@@ -304,7 +304,8 @@ const formatDate = (value: string) => {
   bottom: 40px;
   left: 50%;
   transform: translateX(-50%);
-  width: 340px;
+  width: min(340px, calc(100% - 32px));
+  max-height: calc(100% - 64px);
   background: rgba(255, 255, 255, 0.75);
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
@@ -383,7 +384,7 @@ const formatDate = (value: string) => {
 
 .glass-body {
   padding: 20px;
-  max-height: 55vh;
+  max-height: min(55vh, calc(100vh - 260px));
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(0,0,0,0.15) transparent;

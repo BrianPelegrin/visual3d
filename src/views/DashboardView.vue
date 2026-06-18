@@ -16,9 +16,15 @@
         <div class="col-md-4 d-flex flex-wrap justify-content-md-end gap-2 mt-3 mt-md-0">
           <ExcelLikeFilter
             :items="projectApartments"
+            :visible-fields="dashboardFilterFields"
+            :field-labels="dashboardFilterLabels"
+            :field-types="dashboardFilterTypes"
             @apply="handleDashboardFilterApply"
             @clear="handleDashboardFilterClear"
           />
+          <button class="btn btn-white shadow-sm border-0 px-4 py-2 fw-bold" :disabled="exportableUnits.length === 0" @click="exportDashboardUnitsToExcel">
+            <i class="bi bi-file-earmark-excel me-2"></i>Exportar Excel
+          </button>
           <router-link v-if="!isSalesRole" :to="`/editor/${projectId}`" class="btn btn-white shadow-sm border-0 px-4 py-2 fw-bold">
             <i class="bi bi-box-seam me-2"></i>Visualizador 3D
           </router-link>
@@ -39,8 +45,9 @@
             </div>
             <div class="card-stat-content">
               <h2 class="fw-800 text-slate-900 mb-0">{{ card.value }}</h2>
-              <div v-if="card.subtext" class="smaller-text fw-medium" :class="card.subColor">
-                {{ card.subtext }}
+              <div v-if="card.subtext" class="card-subtext-row smaller-text fw-medium" :class="card.subColor">
+                <span>{{ card.subtext }}</span>
+                <span v-if="card.debtText" class="card-debt-text">{{ card.debtText }}</span>
               </div>
             </div>
           </div>
@@ -59,7 +66,7 @@
                 <i class="bi bi-pin-angle-fill me-1"></i>
                 {{ selectedUnitSummary }}
               </div>
-              <Viewport3D hideUI :visible-detailed-unit-ids="visibleDetailedUnitIds" />
+              <Viewport3D hideUI show-unit-info :visible-detailed-unit-ids="visibleDetailedUnitIds" />
               <ColorGuideModal :show="showColorGuide" @close="showColorGuide = false" />
               <div v-if="!isSalesRole" class="viewport-legend">
                 <button class="legend-help-btn" @click="showColorGuide = true">
@@ -223,6 +230,7 @@ import type { Unit, DetailedUnit } from '../models/types';
 import Viewport3D from '../components/Viewport3D.vue';
 import ColorGuideModal from '../components/ui/ColorGuideModal.vue';
 import ExcelLikeFilter from '../components/ui/ExcelLikeFilter.vue';
+import { dashboardFilterFields, dashboardFilterLabels, dashboardFilterTypes } from '../utils/dashboardFilterFields';
 import { parseDateValue } from '../utils/normalizers';
 import { Bar } from 'vue-chartjs';
 import { getEstadoColor, normalizeEstadoKey } from '../scene/RulesEngine';
@@ -241,6 +249,7 @@ ChartJS.register(ArcElement, BarElement, CategoryScale, LinearScale, Tooltip, Le
 type DashboardStatus = 'available' | 'delivered' | 'financing' | 'inspection' | 'sold' | 'observation';
 type StatusMeta = { label: string; color: string; statusClass: string };
 type DistributionSegment = { label: string; count: number; color: string };
+type DashboardExportRow = Record<'UNIDAD' | 'ESTADO' | 'CLIENTE(NOMBRE)' | 'ADEUDADO' | 'INSP 1' | 'INSP 2' | 'SALDO' | 'ENTREGA' | 'SITUACIÓN', string | number>;
 
 const STATUS_META: Record<DashboardStatus, StatusMeta> = {
   delivered: { label: 'Entregada', color: '#22c55e', statusClass: 'status-green' },
@@ -275,6 +284,10 @@ const hasDashboardFilterResult = computed(() => dashboardFilteredApartments.valu
 
 const filteredProjectApartments = computed(() => {
   return dashboardFilteredApartments.value ?? projectApartments.value;
+});
+const exportableUnits = computed(() => {
+  if (hasDashboardFilterResult.value) return filteredProjectApartments.value;
+  return projectApartments.value;
 });
 const visibleDetailedUnitIds = computed(() =>
   hasDashboardFilterActive.value ? filteredProjectApartments.value.map((apartment) => apartment.id) : null
@@ -420,6 +433,113 @@ const soldUnitsCount = computed(() => {
   return statusCounts.value.sold;
 });
 
+const parseMoneyValue = (value: unknown) => {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value !== 'string') return 0;
+
+  const normalized = value
+    .replace(/[^\d,.-]/g, '')
+    .replace(/,/g, '');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const totalOutstandingAmount = computed(() => filteredProjectApartments.value.reduce((total, apartment) => {
+  const price = parseMoneyValue(apartment.precio);
+  const paid = parseMoneyValue(apartment.pagado);
+  return total + Math.max(0, price - paid);
+}, 0));
+
+const formatCurrency = (value: number) =>
+  new Intl.NumberFormat('es-DO', {
+    style: 'currency',
+    currency: 'DOP',
+    maximumFractionDigits: 0
+  }).format(value);
+
+const formatBooleanForExport = (value: boolean | null | undefined) => value ? 'Si' : 'No';
+
+const formatDateForExport = (value: string | null | undefined) => {
+  const date = parseDateValue(value);
+  if (!date) return value ?? '';
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getUnitSituation = (unit: DetailedUnit) => {
+  if (unit.entregada) return 'Entregada';
+  if (unit.enInspeccion) return 'En inspección';
+  if (unit.saldo) return 'Saldada';
+  if (unit.adeudado && unit.adeudado > 0) return 'Con deuda';
+  if (unit.estado) return unit.estado;
+  return 'Sin situacion';
+};
+
+const sanitizeFileName = (value: string) => value
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-zA-Z0-9-_]+/g, '-')
+  .replace(/^-+|-+$/g, '')
+  .toLowerCase();
+
+const buildDashboardExportRows = (): DashboardExportRow[] => exportableUnits.value.map((unit) => ({
+  UNIDAD: unit.codUnidad || `${unit.edificio}-${unit.unidad}`.replace(/^-|-$/g, '') || unit.unidad || '',
+  ESTADO: unit.estado || '',
+  'CLIENTE(NOMBRE)': unit.nombre || '',
+  ADEUDADO: unit.adeudado ?? 0,
+  'INSP 1': formatBooleanForExport(unit.inspeccion1),
+  'INSP 2': formatBooleanForExport(unit.inspeccion2),
+  SALDO: formatBooleanForExport(unit.saldo),
+  ENTREGA: formatDateForExport(unit.fechaEntrega ?? unit.fechaEntregaInspeccion),
+  SITUACIÓN: getUnitSituation(unit)
+}));
+
+const exportDashboardUnitsToExcel = async () => {
+  const rows = buildDashboardExportRows();
+  if (rows.length === 0) return;
+
+  const XLSX = await import('xlsx-js-style');
+  const headers: Array<keyof DashboardExportRow> = ['UNIDAD', 'ESTADO', 'CLIENTE(NOMBRE)', 'ADEUDADO', 'INSP 1', 'INSP 2', 'SALDO', 'ENTREGA', 'SITUACIÓN'];
+  const worksheet = XLSX.utils.json_to_sheet(rows, {
+    header: headers
+  });
+  const headerStyle = {
+    font: { bold: true, color: { rgb: 'FFFFFF' } },
+    fill: { patternType: 'solid', fgColor: { rgb: '3B82F6' } },
+    alignment: { horizontal: 'center', vertical: 'center' }
+  };
+
+  headers.forEach((_header, index) => {
+    const cellAddress = XLSX.utils.encode_cell({ r: 0, c: index });
+    if (worksheet[cellAddress]) {
+      worksheet[cellAddress].s = headerStyle;
+    }
+  });
+
+  worksheet['!cols'] = [
+    { wch: 18 },
+    { wch: 18 },
+    { wch: 28 },
+    { wch: 14 },
+    { wch: 10 },
+    { wch: 10 },
+    { wch: 10 },
+    { wch: 14 },
+    { wch: 18 }
+  ];
+  worksheet['!rows'] = [{ hpt: 24 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Unidades');
+
+  const projectName = sanitizeFileName(project.value?.nombre || projectId.value || 'dashboard');
+  const filterSuffix = hasDashboardFilterResult.value ? '-filtrado' : '';
+  XLSX.writeFile(workbook, `unidades-${projectName}${filterSuffix}.xlsx`);
+};
+
 const topCards = computed(() => {
   const sold = soldUnitsCount.value;
   const inspection = statusCounts.value.inspection;
@@ -431,7 +551,7 @@ const topCards = computed(() => {
 
   return [
     { label: 'Total unidades', value: totalUnits.value, subtext: `En ${buildingsCount.value} edificios`, icon: 'bi-grid-3x3-gap', colorClass: 'bg-blue-soft', subColor: 'text-slate-400' },
-    { label: 'Vendidas', value: sold, subtext: totalUnits.value > 0 ? `${soldRate}% del total` : 'Sin datos', icon: 'bi-bag-check', colorClass: 'bg-indigo-soft', subColor: 'text-indigo-600' },
+    { label: 'Vendidas', value: sold, subtext: totalUnits.value > 0 ? `${soldRate}% del total` : 'Sin datos', debtText: `Monto total adeudado ${formatCurrency(totalOutstandingAmount.value)}`, icon: 'bi-bag-check', colorClass: 'bg-indigo-soft', subColor: 'text-indigo-600' },
     { label: 'Unidades Listas', value: inspection, subtext: `Unidades Listas ${inspection} de ${totalUnits.value}`, icon: 'bi-clipboard-check', colorClass: 'bg-green-soft', subColor: 'text-green-600' },
     { label: 'Disponibles', value: availableObservation, subtext: `Disponibles ${availableObservation} de ${totalUnits.value}`, icon: 'bi-house-door', colorClass: 'bg-amber-soft', subColor: 'text-amber-600' }
   ];
@@ -538,8 +658,10 @@ const filteredBuildingStats = computed(() => {
 });
 
 const distributionSegments = computed<DistributionSegment[]>(() => {
+  const paletteVersion = appStore.unitColorSettings.map((item) => `${item.estado}:${item.colorCss}`).join('|');
   const sourceApartments = filteredProjectApartments.value;
   const grouped = new Map<string, { label: string; count: number }>();
+  void paletteVersion;
 
   for (const apartment of sourceApartments) {
     const rawEstado = String(apartment.estado ?? '').trim();
@@ -706,23 +828,15 @@ watch(projectId, (newId) => {
   color: #1e293b;
 }
 
-.text-slate-900 { color: #0f172a; }
-.text-slate-800 { color: #1e293b; }
-.text-slate-700 { color: #334155; }
-.text-slate-500 { color: #64748b; }
-.text-slate-400 { color: #94a3b8; }
 .bg-slate-50 { background-color: #f8fafc; }
 .text-orange-500 { color: #f97316; }
 .text-green-600 { color: #16a34a; }
 .text-red-500 { color: #ef4444; }
-.text-blue-600 { color: #2563eb; }
 .text-indigo-600 { color: #4f46e5; }
 .text-amber-600 { color: #d97706; }
-.bg-blue-600 { background: #2563eb; }
 .bg-blue-200 { background: #bfdbfe; }
 .bg-blue-100 { background: #dbeafe; }
 
-.bg-blue-soft { background: #eff6ff; color: #3b82f6; }
 .bg-green-soft { background: #f0fdf4; color: #22c55e; }
 .bg-cyan-soft { background: #ecfeff; color: #06b6d4; }
 .bg-red-soft { background: #fef2f2; color: #ef4444; }
@@ -732,13 +846,6 @@ watch(projectId, (newId) => {
 .fw-800 { font-weight: 800; }
 .ls-1 { letter-spacing: 0.05em; }
 .smaller-text { font-size: 0.75rem; }
-
-.btn-white {
-  background: white;
-  color: #64748b;
-  font-weight: 600;
-  border: 1px solid #e2e8f0 !important;
-}
 
 .btn-primary-custom {
   background: #3b82f6;
@@ -810,6 +917,24 @@ watch(projectId, (newId) => {
 
 .stat-card-v2:hover {
   transform: translateY(-2px);
+}
+
+.card-subtext-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.card-debt-text {
+  color: #475569;
+  font-weight: 800;
+}
+
+.card-debt-text::before {
+  content: '•';
+  color: #cbd5e1;
+  margin-right: 10px;
 }
 
 .card-icon-box {

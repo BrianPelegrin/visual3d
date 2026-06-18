@@ -15,7 +15,17 @@
             Listado detallado de apartamentos, estados financieros y procesos legales.
           </p>
         </div>
-        <div class="col-md-4 d-flex justify-content-md-end gap-2 mt-3 mt-md-0">
+        <div class="col-md-4 d-flex flex-wrap justify-content-md-end gap-2 mt-3 mt-md-0">
+          <ExcelLikeFilter
+            :key="advancedFilterKey"
+            :items="projectUnits"
+            :visible-fields="dashboardFilterFields"
+            :field-labels="dashboardFilterLabels"
+            :field-types="dashboardFilterTypes"
+            trigger-label="Filtros"
+            @apply="handleAdvancedFilterApply"
+            @clear="handleAdvancedFilterClear"
+          />
           <router-link :to="`/dashboard/${projectId}`" class="btn btn-white shadow-sm border-0 px-3 py-2">
             <i class="bi bi-speedometer2 me-2"></i>Dashboard
           </router-link>
@@ -94,6 +104,10 @@
                  <span>Limpiar</span>
                </button>
             </div>
+          </div>
+          <div v-if="hasAdvancedFilterActive" class="advanced-filter-summary mt-3">
+            <i class="bi bi-funnel-fill"></i>
+            Filtro avanzado activo: {{ advancedFilteredUnits?.length ?? 0 }} de {{ projectUnits.length }} unidades.
           </div>
         </div>
       </div>
@@ -480,6 +494,8 @@ import { ref, computed, onMounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { appStore, selectProject, loadProjectApartments } from '../store/appStore';
 import type { DetailedUnit } from '../models/types';
+import ExcelLikeFilter, { type FilterResult } from '../components/ui/ExcelLikeFilter.vue';
+import { dashboardFilterFields, dashboardFilterLabels, dashboardFilterTypes } from '../utils/dashboardFilterFields';
 
 const route = useRoute();
 const projectId = route.params.id as string;
@@ -489,6 +505,9 @@ const project = computed(() => appStore.projects.find(p => p.id === projectId));
 // MODAL STATE
 const showModal = ref(false);
 const selectedUnit = ref<DetailedUnit | null>(null);
+const advancedFilteredUnits = ref<DetailedUnit[] | null>(null);
+const activeAdvancedFilterCount = ref(0);
+const advancedFilterKey = ref(0);
 
 const headerBgClass = computed(() => {
   if (!selectedUnit.value) return 'bg-slate-800';
@@ -512,16 +531,17 @@ const filters = ref({
   responsable: '',
   withDebt: false
 });
+const hasAdvancedFilterActive = computed(() => activeAdvancedFilterCount.value > 0);
 
 // Reset pagination when filters change
 watch(filters, () => {
   currentPage.value = 1;
 }, { deep: true });
 
+const projectUnits = computed(() => appStore.detailedUnits.filter((unit) => unit.codUnidad.startsWith(projectId)));
+
 const availableBuildings = computed(() => {
-    const buildings = new Set(appStore.detailedUnits
-        .filter(u => u.codUnidad.startsWith(projectId))
-        .map(u => u.edificio));
+    const buildings = new Set(projectUnits.value.map(u => u.edificio));
     return Array.from(buildings).sort();
 });
 
@@ -529,14 +549,10 @@ const currentPage = ref(1);
 const itemsPerPage = 5;
 
 const banks = ["Apap", "Popular", "BHD", "Alnap", "Banreservas", "Santa Cruz", "Scotiabank", "Cibao", "Banesco"];
+const unitFilterSource = computed(() => advancedFilteredUnits.value ?? projectUnits.value);
 
 const filteredUnits = computed(() => {
-  return appStore.detailedUnits.filter(u => {
-    // Basic filter by project id assuming codUnidad contains it or we add a project field
-    // For this demo, we'll assume the codUnidad starts with the project ID
-    const matchesProject = u.codUnidad.startsWith(projectId);
-    if (!matchesProject) return false;
-
+  return unitFilterSource.value.filter(u => {
     const matchesSearch = !filters.value.search || 
       u.codUnidad.toLowerCase().includes(filters.value.search.toLowerCase()) ||
       u.nombre.toLowerCase().includes(filters.value.search.toLowerCase()) ||
@@ -551,6 +567,18 @@ const filteredUnits = computed(() => {
     return matchesSearch && matchesStatus && matchesBuilding && matchesBank && matchesResp && matchesDebt;
   });
 });
+
+const handleAdvancedFilterApply = (result: FilterResult) => {
+  advancedFilteredUnits.value = result.filteredItems as DetailedUnit[];
+  activeAdvancedFilterCount.value = result.activeFilters.length;
+  currentPage.value = 1;
+};
+
+const handleAdvancedFilterClear = () => {
+  advancedFilteredUnits.value = null;
+  activeAdvancedFilterCount.value = 0;
+  currentPage.value = 1;
+};
 
 const totalPages = computed(() => Math.ceil(filteredUnits.value.length / itemsPerPage));
 const startIndex = computed(() => (currentPage.value - 1) * itemsPerPage);
@@ -601,6 +629,8 @@ const resetFilters = () => {
     responsable: '',
     withDebt: false
   };
+  handleAdvancedFilterClear();
+  advancedFilterKey.value += 1;
   currentPage.value = 1;
 };
 
@@ -647,6 +677,7 @@ const retryApartmentsLoad = async () => {
 
 watch(() => route.params.id, (newId) => {
   if (typeof newId === 'string' && newId) {
+    resetFilters();
     selectProject(newId);
   }
 });
@@ -669,6 +700,20 @@ watch(() => route.params.id, (newId) => {
 .filter-glass {
   background: white;
   border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.advanced-filter-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.78rem;
+  font-weight: 800;
 }
 
 .form-control, .form-select {
@@ -701,20 +746,6 @@ watch(() => route.params.id, (newId) => {
 .smaller-text { font-size: 0.75rem; }
 .ls-1 { letter-spacing: 0.05em; }
 
-.btn-white {
-  background: white;
-  color: #64748b;
-  border: 1px solid #e2e8f0 !important;
-  font-weight: 600;
-}
-
-.bg-blue-soft { background: #eff6ff; }
-.text-blue-600 { color: #2563eb; }
-.text-slate-900 { color: #0f172a; }
-.text-slate-700 { color: #334155; }
-.text-slate-500 { color: #64748b; }
-.text-slate-400 { color: #94a3b8; }
-.text-slate-300 { color: #cbd5e1; }
 /* Table */
 .units-table thead th {
   padding: 16px;
@@ -932,7 +963,6 @@ watch(() => route.params.id, (newId) => {
 }
 
 .bg-emerald-600 { background-color: #059669 !important; }
-.bg-blue-600 { background-color: #2563eb !important; }
 .bg-cyan-600 { background-color: #0891b2 !important; }
 .bg-indigo-600 { background-color: #4f46e5 !important; }
 .bg-red-600 { background-color: #dc2626 !important; }

@@ -42,10 +42,20 @@ onUnmounted(() => {
 });
 
 const colorLegend = computed(() => {
+  const paletteVersion = appStore.unitColorSettings.map((item) => `${item.estado}:${item.colorCss}`).join('|');
   const states = new Map<string, string>();
+  void paletteVersion;
 
   for (const apartment of appStore.detailedUnits) {
     const label = String(apartment.estado ?? '').trim() || 'Sin estado';
+    const key = normalizeEstadoKey(label) || 'sin_estado';
+    if (!states.has(key)) {
+      states.set(key, label);
+    }
+  }
+
+  for (const setting of appStore.unitColorSettings) {
+    const label = String(setting.estado ?? '').trim() || 'Sin estado';
     const key = normalizeEstadoKey(label) || 'sin_estado';
     if (!states.has(key)) {
       states.set(key, label);

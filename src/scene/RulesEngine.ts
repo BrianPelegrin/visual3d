@@ -12,6 +12,8 @@ export const UNIT_ESTADO_COLORS: Record<string, UnitEstadoColor> = {
     intercambio: { label: 'Intercambio', colorHex: 0x64748b, colorCss: '#64748b' }
 };
 
+let activeEstadoColors: Record<string, UnitEstadoColor> = { ...UNIT_ESTADO_COLORS };
+
 export const DYNAMIC_ESTADO_COLORS = [
     { colorHex: 0xf59e0b, colorCss: '#f59e0b' },
     { colorHex: 0x06b6d4, colorCss: '#06b6d4' },
@@ -41,7 +43,7 @@ const getDynamicColorIndex = (key: string) => {
 
 export const getEstadoColor = (estado: unknown, labelFallback = 'Sin estado'): UnitEstadoColor => {
     const key = normalizeEstadoKey(estado) || 'sin_estado';
-    const knownColor = UNIT_ESTADO_COLORS[key];
+    const knownColor = activeEstadoColors[key];
     if (knownColor) return knownColor;
 
     const dynamicColor = DYNAMIC_ESTADO_COLORS[getDynamicColorIndex(key)];
@@ -52,6 +54,8 @@ export const getEstadoColor = (estado: unknown, labelFallback = 'Sin estado'): U
         colorCss: dynamicColor.colorCss
     };
 };
+
+export const getActiveEstadoColors = () => ({ ...activeEstadoColors });
 
 export class RulesEngine {
     private estadoColors: Record<string, UnitEstadoColor>;
@@ -72,3 +76,8 @@ export class RulesEngine {
 
 // Singleton instance for the app.
 export const globalRulesEngine = new RulesEngine();
+
+export const applyEstadoColors = (newEstadoColors: Record<string, UnitEstadoColor>) => {
+    activeEstadoColors = { ...newEstadoColors };
+    globalRulesEngine.updateEstadoColors(activeEstadoColors);
+};

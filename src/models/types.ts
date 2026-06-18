@@ -45,6 +45,15 @@ export interface Blueprint {
     height: number;
 }
 
+export interface BlueprintTransform {
+    x: number;
+    z: number;
+    width: number;
+    depth: number;
+    rotationY: number;
+    opacity: number;
+}
+
 export type UserRole = 'admin' | 'editor' | 'viewer' | 'ventas';
 
 export interface User {
@@ -108,4 +117,10 @@ export interface DetailedUnit {
     saldo: boolean | null;
     entregada: boolean | null;
     descargadaDGII: boolean | null;
+}
+
+export interface UnitColorSetting {
+    id: number | string | null;
+    estado: string;
+    colorCss: string;
 }

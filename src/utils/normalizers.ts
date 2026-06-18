@@ -48,6 +48,20 @@ export const parseDateValue = (value: unknown): Date | null => {
   const raw = normalizeText(value);
   if (!raw) return null;
 
+  const numericText = raw.replace(/,/g, '');
+  if (/^\d+(\.\d+)?$/.test(numericText)) {
+    const numericValue = Number(numericText);
+    if (Number.isFinite(numericValue)) {
+      if (numericValue > 20000) {
+        const ms = Math.round((numericValue - 25569) * 86400 * 1000);
+        const date = new Date(ms);
+        return Number.isNaN(date.getTime()) ? null : date;
+      }
+      const unix = new Date(numericValue);
+      return Number.isNaN(unix.getTime()) ? null : unix;
+    }
+  }
+
   const nativeParsed = new Date(raw);
   if (!Number.isNaN(nativeParsed.getTime())) return nativeParsed;
 

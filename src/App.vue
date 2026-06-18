@@ -65,6 +65,9 @@ const openProfile = () => {
         <router-link v-if="currentUser?.role === 'admin'" to="/users" class="nav-item" title="Usuarios">
           <i class="bi bi-people"></i>
         </router-link>
+        <router-link v-if="currentUser?.role === 'admin'" to="/settings" class="nav-item" title="Configuraciones">
+          <i class="bi bi-gear"></i>
+        </router-link>
       </div>
       
       <div class="mt-auto mb-2 d-flex flex-column gap-3 align-items-center">

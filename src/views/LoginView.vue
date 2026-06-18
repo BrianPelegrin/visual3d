@@ -194,9 +194,6 @@ const handleLogin = async () => {
 }
 
 /* Forms */
-.text-slate-900 { color: #0f172a; }
-.text-slate-500 { color: #64748b; }
-.text-slate-400 { color: #94a3b8; }
 .fw-800 { font-weight: 800; }
 .ls-1 { letter-spacing: 0.05em; }
 .smaller-text { font-size: 0.75rem; }

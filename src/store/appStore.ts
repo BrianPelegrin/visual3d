@@ -1,6 +1,6 @@
 import { reactive } from 'vue';
-import type { Building, Unit, UnitStatus, User, Project, DetailedUnit } from '../models/types';
-import * as XLSX from 'xlsx';
+import type { BlueprintTransform, Building, Unit, UnitColorSetting, UnitStatus, User, Project, DetailedUnit } from '../models/types';
+import { applyEstadoColors, normalizeEstadoKey, UNIT_ESTADO_COLORS, type UnitEstadoColor } from '../scene/RulesEngine';
 import type {
     ApiApartmentsResponse,
     ApiApartmentRecord,
@@ -30,13 +30,17 @@ type AuthSession = {
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5153/api';
+const UNIT_COLORS_ENDPOINT = `${API_BASE_URL}/Settings/unit-colors`;
 const AUTH_STORAGE_KEY = 'auth_session';
 const AUTH_RETURN_TO_KEY = 'auth_return_to';
 const INITIAL_FETCH_TIMEOUT_MS = 12000;
+const PROJECT_DETAIL_FETCH_TIMEOUT_MS = 45000;
 let authInitializationPromise: Promise<void> | null = null;
 let projectsLoadPromise: Promise<Project[]> | null = null;
 let usersLoadPromise: Promise<User[]> | null = null;
 let availableProjectIdsLoadPromise: Promise<string[]> | null = null;
+
+const loadXlsx = () => import('xlsx');
 
 const beginNetworkActivity = () => {
     appStore.networkBusyCount += 1;
@@ -191,13 +195,15 @@ const upsertProjectState = (project: Project) => {
     appStore.availableProjectIds = [...new Set([...appStore.availableProjectIds, project.id])];
 };
 
-const syncProjectLayoutState = (projectId: string, buildings: Building[], gridSize?: number) => {
+const syncProjectLayoutState = (projectId: string, buildings: Building[], gridSize?: number, blueprintTransform?: BlueprintTransform | null) => {
     const preservedBuildings = appStore.buildings.filter(building => building.projectId !== projectId);
     appStore.buildings = [...preservedBuildings, ...buildings];
 
     if (typeof gridSize === 'number') {
         appStore.gridSize = gridSize;
     }
+
+    appStore.blueprintTransform = blueprintTransform ?? null;
 };
 
 const clearProjectLayoutState = (projectId: string) => {
@@ -256,6 +262,96 @@ const normalizeStringListResponse = (payload: unknown): string[] => {
     return [];
 };
 
+const isValidHexColor = (value: unknown): value is string =>
+    typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value.trim());
+
+const normalizeHexColor = (value: unknown, fallback = '#64748b') =>
+    isValidHexColor(value) ? value.trim().toLowerCase() : fallback;
+
+const hexToNumber = (value: string) => Number.parseInt(value.replace('#', ''), 16);
+
+const normalizeUnitColorSetting = (payload: unknown): UnitColorSetting | null => {
+    if (!payload || typeof payload !== 'object') return null;
+
+    const source = payload as Record<string, unknown>;
+    const estado = String(
+        source.estado
+        ?? source.Estado
+        ?? source.name
+        ?? source.Name
+        ?? source.label
+        ?? source.Label
+        ?? ''
+    ).trim();
+    const colorCss = normalizeHexColor(
+        source.colorCss
+        ?? source.ColorCss
+        ?? source.color
+        ?? source.Color
+        ?? source.hex
+        ?? source.Hex
+    );
+
+    if (!estado) return null;
+
+    return {
+        id: (source.id ?? source.Id ?? null) as number | string | null,
+        estado,
+        colorCss
+    };
+};
+
+const normalizeUnitColorSettingsResponse = (payload: unknown): UnitColorSetting[] => {
+    const source = payload as {
+        colors?: unknown[];
+        unitColors?: unknown[];
+        unitStatusColors?: unknown[];
+        data?: unknown[];
+        items?: unknown[];
+        result?: unknown[];
+    };
+
+    const list = Array.isArray(payload)
+        ? payload
+        : (!payload || typeof payload !== 'object')
+            ? []
+            : (source.colors ?? source.unitColors ?? source.unitStatusColors ?? source.data ?? source.items ?? source.result ?? []);
+
+    if (!Array.isArray(list)) return [];
+
+    return list
+        .map(normalizeUnitColorSetting)
+        .filter((item): item is UnitColorSetting => item !== null);
+};
+
+const buildEstadoColorsFromSettings = (settings: UnitColorSetting[]): Record<string, UnitEstadoColor> => {
+    const estadoColors: Record<string, UnitEstadoColor> = { ...UNIT_ESTADO_COLORS };
+
+    settings.forEach((setting) => {
+        const key = normalizeEstadoKey(setting.estado);
+        if (!key) return;
+        estadoColors[key] = {
+            label: setting.estado,
+            colorCss: setting.colorCss,
+            colorHex: hexToNumber(setting.colorCss)
+        };
+    });
+
+    return estadoColors;
+};
+
+const syncUnitColorSettingsState = (settings: UnitColorSetting[]) => {
+    appStore.unitColorSettings = settings;
+    applyEstadoColors(buildEstadoColorsFromSettings(settings));
+};
+
+const defaultUnitColorSettings = (): UnitColorSetting[] =>
+    Object.values(UNIT_ESTADO_COLORS).map((item) => ({
+        id: null,
+        estado: item.label,
+        colorCss: item.colorCss
+    }));
+
 const normalizeProjectResponse = (payload: unknown): Project | null => {
     if (!payload || typeof payload !== 'object') {
         return null;
@@ -271,10 +367,49 @@ const normalizeProjectResponse = (payload: unknown): Project | null => {
     return null;
 };
 
+const DEFAULT_GRID_SIZE = 300;
 const DEFAULT_LAYOUT_COLS = 2;
 const DEFAULT_LAYOUT_ROWS = 2;
 const MAX_LAYOUT_COLS = 12;
 const MAX_LAYOUT_ROWS = 12;
+
+const normalizeGridSize = (value: unknown, fallback = DEFAULT_GRID_SIZE) => {
+    const numericValue = typeof value === 'number'
+        ? value
+        : (typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN);
+
+    if (Number.isFinite(numericValue) && numericValue > 0) {
+        return numericValue;
+    }
+    return fallback;
+};
+
+const clampNumber = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+const normalizeNumber = (value: unknown, fallback: number) => {
+    const numericValue = typeof value === 'number'
+        ? value
+        : (typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN);
+    return Number.isFinite(numericValue) ? numericValue : fallback;
+};
+
+const normalizeBlueprintTransform = (value: unknown): BlueprintTransform | null => {
+    if (!value || typeof value !== 'object') return null;
+
+    const source = value as Partial<Record<keyof BlueprintTransform, unknown>>;
+    const width = normalizeNumber(source.width, 0);
+    const depth = normalizeNumber(source.depth, 0);
+    if (width <= 0 || depth <= 0) return null;
+
+    return {
+        x: normalizeNumber(source.x, 0),
+        z: normalizeNumber(source.z, 0),
+        width,
+        depth,
+        rotationY: normalizeNumber(source.rotationY, 0),
+        opacity: clampNumber(normalizeNumber(source.opacity, 1), 0.15, 1)
+    };
+};
 
 const normalizeLayoutDimension = (value: unknown, fallback: number, max: number) => {
     if (typeof value === 'number' && Number.isFinite(value)) {
@@ -326,9 +461,9 @@ const createAutoUnit = (buildingId: string, index: number, floor: number, slot: 
     paid: false
 });
 
-const normalizeLayoutResponse = (payload: unknown): { gridSize?: number; buildings: Building[] } => {
+const normalizeLayoutResponse = (payload: unknown): { gridSize: number; blueprintTransform: BlueprintTransform | null; buildings: Building[] } => {
     if (!payload || typeof payload !== 'object') {
-        return { buildings: [] };
+        return { gridSize: DEFAULT_GRID_SIZE, blueprintTransform: null, buildings: [] };
     }
 
     const candidate = payload as ApiProjectLayoutResponse;
@@ -336,7 +471,8 @@ const normalizeLayoutResponse = (payload: unknown): { gridSize?: number; buildin
     const buildings = Array.isArray(source.buildings) ? source.buildings : [];
 
     return {
-        gridSize: source.gridSize,
+        gridSize: normalizeGridSize(source.gridSize),
+        blueprintTransform: normalizeBlueprintTransform(source.blueprintTransform),
         buildings: buildings.map((building) => {
             const layoutCols = normalizeLayoutDimension((building as Partial<Building>).layoutCols, DEFAULT_LAYOUT_COLS, MAX_LAYOUT_COLS);
             const layoutRows = normalizeLayoutDimension((building as Partial<Building>).layoutRows, DEFAULT_LAYOUT_ROWS, MAX_LAYOUT_ROWS);
@@ -898,6 +1034,7 @@ interface AppState {
     users: User[];
     projects: Project[];
     detailedUnits: DetailedUnit[];
+    unitColorSettings: UnitColorSetting[];
     detailedUnitsByProject: Record<string, DetailedUnit[]>;
     apartmentStatsByProject: Record<string, ApiApartmentStatsResponse>;
     availableProjectIds: string[];
@@ -908,17 +1045,22 @@ interface AppState {
     selectedBuildingId: string | null;
     selectedUnitId: string | null;
     gridSize: number;
+    blueprintTransform: BlueprintTransform | null;
     currentProjectLayoutStatus: 'idle' | 'loading' | 'saving' | 'ready' | 'missing' | 'error';
     currentProjectLayoutMessage: string;
     isProjectsLoading: boolean;
     isApartmentsLoading: boolean;
+    isUnitColorsLoading: boolean;
+    isUnitColorsSaving: boolean;
     isApartmentsLoadingByProject: Record<string, boolean>;
     projectsErrorMessage: string;
+    unitColorsErrorMessage: string;
     apartmentsErrorByProject: Record<string, string>;
     networkBusyCount: number;
     isAuthInitializing: boolean;
     isProjectContextLoading: boolean;
     visualFilters: {
+        detailedUnitIds: number[] | null;
         status: UnitStatus | null;
         bank: string | null;
         hasDebt: boolean | null;
@@ -939,6 +1081,7 @@ export const appStore = reactive<AppState>({
     projects: [],
     availableProjectIds: [],
     detailedUnits: [],
+    unitColorSettings: defaultUnitColorSettings(),
     detailedUnitsByProject: {},
     apartmentStatsByProject: {},
     currentUser: null,
@@ -947,18 +1090,23 @@ export const appStore = reactive<AppState>({
     isAuthenticated: false,
     selectedBuildingId: null,
     selectedUnitId: null,
-    gridSize: 300,
+    gridSize: DEFAULT_GRID_SIZE,
+    blueprintTransform: null,
     currentProjectLayoutStatus: 'idle',
     currentProjectLayoutMessage: '',
     isProjectsLoading: false,
     isApartmentsLoading: false,
+    isUnitColorsLoading: false,
+    isUnitColorsSaving: false,
     isApartmentsLoadingByProject: {},
     projectsErrorMessage: '',
+    unitColorsErrorMessage: '',
     apartmentsErrorByProject: {},
     networkBusyCount: 0,
     isAuthInitializing: false,
     isProjectContextLoading: false,
     visualFilters: {
+        detailedUnitIds: null,
         status: null,
         bank: null,
         hasDebt: null,
@@ -974,8 +1122,21 @@ export const selectProject = (id: string | null) => {
     appStore.currentProjectId = id;
     appStore.selectedBuildingId = null;
     appStore.selectedUnitId = null;
+    appStore.visualFilters = {
+        detailedUnitIds: null,
+        status: null,
+        bank: null,
+        hasDebt: null,
+        enInspeccion: null,
+        legal: null,
+        titulo: null,
+        descargadaDGII: null,
+        saldo: null
+    };
 
     if (id) {
+        appStore.gridSize = DEFAULT_GRID_SIZE;
+        appStore.blueprintTransform = null;
         clearProjectLayoutState(id);
         syncCurrentProjectApartments(id);
         appStore.currentProjectLayoutStatus = 'loading';
@@ -1052,6 +1213,25 @@ export const addBuilding = (position: { x: number, z: number }) => {
 
 export const setGridSize = (size: number) => {
     appStore.gridSize = size;
+};
+
+export const setBlueprintTransform = (transform: BlueprintTransform | Partial<BlueprintTransform> | null) => {
+    if (transform === null) {
+        appStore.blueprintTransform = null;
+        return;
+    }
+
+    const base = appStore.blueprintTransform ?? {
+        x: 0,
+        z: 0,
+        width: Math.max(1, appStore.gridSize * 0.8),
+        depth: Math.max(1, appStore.gridSize * 0.8),
+        rotationY: 0,
+        opacity: 1
+    };
+
+    const nextTransform = normalizeBlueprintTransform({ ...base, ...transform });
+    appStore.blueprintTransform = nextTransform;
 };
 
 export const setVisualFilters = (filters: Partial<AppState['visualFilters']>) => {
@@ -1392,6 +1572,155 @@ export const deleteUser = async (id: number) => {
     }
 };
 
+export const loadUnitColorSettings = async () => {
+    appStore.isUnitColorsLoading = true;
+    appStore.unitColorsErrorMessage = '';
+    beginNetworkActivity();
+
+    try {
+        const response = await fetchWithTimeout(UNIT_COLORS_ENDPOINT, {
+            headers: {
+                ...getAuthHeaders()
+            }
+        });
+
+        if (handleUnauthorizedResponse(response)) {
+            return appStore.unitColorSettings;
+        }
+
+        if (!response.ok) {
+            throw new Error('No se pudieron cargar los colores de unidades.');
+        }
+
+        const payload = await response.json();
+        const settings = normalizeUnitColorSettingsResponse(payload);
+        syncUnitColorSettingsState(settings.length > 0 ? settings : defaultUnitColorSettings());
+        return appStore.unitColorSettings;
+    } catch (error) {
+        appStore.unitColorsErrorMessage = error instanceof Error
+            ? error.message
+            : 'No se pudieron cargar los colores de unidades.';
+        syncUnitColorSettingsState(appStore.unitColorSettings.length > 0 ? appStore.unitColorSettings : defaultUnitColorSettings());
+        return appStore.unitColorSettings;
+    } finally {
+        appStore.isUnitColorsLoading = false;
+        endNetworkActivity();
+    }
+};
+
+export const saveUnitColorSetting = async (setting: Omit<UnitColorSetting, 'id'> & { id?: UnitColorSetting['id'] }) => {
+    const estado = setting.estado.trim();
+    const colorCss = normalizeHexColor(setting.colorCss);
+    const id = setting.id ?? null;
+
+    if (!estado) {
+        throw new Error('El nombre del estado es requerido.');
+    }
+
+    appStore.isUnitColorsSaving = true;
+    appStore.unitColorsErrorMessage = '';
+    beginNetworkActivity();
+
+    try {
+        const response = await fetch(id === null ? UNIT_COLORS_ENDPOINT : `${UNIT_COLORS_ENDPOINT}/${encodeURIComponent(String(id))}`, {
+            method: id === null ? 'POST' : 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                ...getAuthHeaders()
+            },
+            body: JSON.stringify({
+                id,
+                estado,
+                name: estado,
+                label: estado,
+                color: colorCss,
+                colorCss
+            })
+        });
+
+        if (handleUnauthorizedResponse(response)) {
+            return null;
+        }
+
+        if (!response.ok) {
+            throw new Error('No se pudo guardar el color del estado.');
+        }
+
+        let responsePayload: unknown = null;
+        try {
+            responsePayload = await response.json();
+        } catch (_parseError) {
+            responsePayload = null;
+        }
+
+        const savedSetting = normalizeUnitColorSetting(responsePayload)
+            ?? normalizeUnitColorSettingsResponse(responsePayload)[0]
+            ?? { id: id ?? normalizeEstadoKey(estado), estado, colorCss };
+        const savedKey = normalizeEstadoKey(savedSetting.estado);
+        const nextSettings = [...appStore.unitColorSettings];
+        const existingIndex = nextSettings.findIndex((item) =>
+            (savedSetting.id !== null && item.id === savedSetting.id)
+            || normalizeEstadoKey(item.estado) === savedKey
+        );
+
+        if (existingIndex >= 0) {
+            nextSettings[existingIndex] = savedSetting;
+        } else {
+            nextSettings.push(savedSetting);
+        }
+
+        syncUnitColorSettingsState(nextSettings);
+        return savedSetting;
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'No se pudo guardar el color del estado.';
+        appStore.unitColorsErrorMessage = message;
+        throw new Error(message);
+    } finally {
+        appStore.isUnitColorsSaving = false;
+        endNetworkActivity();
+    }
+};
+
+export const deleteUnitColorSetting = async (setting: UnitColorSetting) => {
+    const identifier = setting.id ?? normalizeEstadoKey(setting.estado);
+
+    appStore.isUnitColorsSaving = true;
+    appStore.unitColorsErrorMessage = '';
+    beginNetworkActivity();
+
+    try {
+        const response = await fetch(`${UNIT_COLORS_ENDPOINT}/${encodeURIComponent(String(identifier))}`, {
+            method: 'DELETE',
+            headers: {
+                ...getAuthHeaders()
+            }
+        });
+
+        if (handleUnauthorizedResponse(response)) {
+            return false;
+        }
+
+        if (!response.ok) {
+            throw new Error('No se pudo eliminar el color del estado.');
+        }
+
+        const deletedKey = normalizeEstadoKey(setting.estado);
+        syncUnitColorSettingsState(
+            appStore.unitColorSettings.filter((item) =>
+                item.id !== setting.id && normalizeEstadoKey(item.estado) !== deletedKey
+            )
+        );
+        return true;
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'No se pudo eliminar el color del estado.';
+        appStore.unitColorsErrorMessage = message;
+        throw new Error(message);
+    } finally {
+        appStore.isUnitColorsSaving = false;
+        endNetworkActivity();
+    }
+};
+
 // Auth Actions
 export const login = async (email: string, password?: string) => {
     const response = await fetch(`${API_BASE_URL}/Auth/login`, {
@@ -1423,6 +1752,7 @@ export const login = async (email: string, password?: string) => {
         refreshToken: data.refreshToken ?? null
     });
 
+    void loadUnitColorSettings();
     void loadAvailableProjectIds();
     if (normalizedUser.role === 'admin') {
         void loadUsers();
@@ -1436,6 +1766,7 @@ export const logout = () => {
     appStore.accessToken = null;
     appStore.refreshToken = null;
     appStore.isAuthenticated = false;
+    syncUnitColorSettingsState(defaultUnitColorSettings());
     localStorage.removeItem(AUTH_STORAGE_KEY);
 };
 
@@ -1481,6 +1812,7 @@ export const ensureAuthInitialized = async () => {
         }
 
         await Promise.all([
+            loadUnitColorSettings(),
             loadAvailableProjectIds(),
             ...(appStore.currentUser?.role === 'admin' ? [loadUsers()] : [])
         ]);
@@ -1599,7 +1931,7 @@ export const loadProject = async (projectId: string) => {
             headers: {
                 ...getAuthHeaders()
             }
-        });
+        }, PROJECT_DETAIL_FETCH_TIMEOUT_MS);
 
         if (handleUnauthorizedResponse(response)) {
             return null;
@@ -1669,7 +2001,7 @@ export const loadProjectLayout = async (projectId: string) => {
             return layout;
         }
 
-        syncProjectLayoutState(projectId, layout.buildings, layout.gridSize);
+        syncProjectLayoutState(projectId, layout.buildings, layout.gridSize, layout.blueprintTransform);
         linkProjectApartmentsToLayout(projectId);
         appStore.currentProjectLayoutStatus = 'ready';
         appStore.currentProjectLayoutMessage = '';
@@ -1771,6 +2103,7 @@ export const generateProjectLayoutFromExcel = async (file: File) => {
     }
 
     try {
+        const XLSX = await loadXlsx();
         const fileBuffer = await file.arrayBuffer();
         const workbook = XLSX.read(fileBuffer, { type: 'array' });
         const targetSheetName = workbook.SheetNames.find((sheetName) => sheetName.trim().toLowerCase() === projectId.trim().toLowerCase());
@@ -1822,7 +2155,7 @@ export const generateProjectLayoutFromApartments = async () => {
     const parsedRows = buildLayoutRowsFromApartments(apartments);
     if (parsedRows.length === 0) {
         appStore.currentProjectLayoutStatus = 'error';
-        appStore.currentProjectLayoutMessage = 'No hay apartamentos validos para generar el layout desde la API.';
+        appStore.currentProjectLayoutMessage = 'No hay apartamentos válidos para generar el layout desde la API.';
         return null;
     }
 
@@ -1849,6 +2182,7 @@ export const previewProjectLayoutFromExcel = async (file: File) => {
     }
 
     try {
+        const XLSX = await loadXlsx();
         const fileBuffer = await file.arrayBuffer();
         const workbook = XLSX.read(fileBuffer, { type: 'array' });
         const targetSheetName = workbook.SheetNames.find((sheetName) => sheetName.trim().toLowerCase() === projectId.trim().toLowerCase());
@@ -1899,7 +2233,7 @@ export const previewProjectLayoutFromApartments = async () => {
     const parsedRows = buildLayoutRowsFromApartments(apartments);
     if (parsedRows.length === 0) {
         appStore.currentProjectLayoutStatus = 'error';
-        appStore.currentProjectLayoutMessage = 'No hay apartamentos validos para generar el layout desde la API.';
+        appStore.currentProjectLayoutMessage = 'No hay apartamentos válidos para generar el layout desde la API.';
         return null;
     }
 
@@ -1937,6 +2271,7 @@ export const saveProjectLayout = async () => {
             body: JSON.stringify({
                 projectId,
                 gridSize: appStore.gridSize,
+                blueprintTransform: appStore.blueprintTransform,
                 buildings: projectBuildings
             })
         });
@@ -1960,7 +2295,7 @@ export const saveProjectLayout = async () => {
 
         const payload = await response.json();
         const layout = normalizeLayoutResponse(payload);
-        syncProjectLayoutState(projectId, layout.buildings.length > 0 ? layout.buildings : projectBuildings, layout.gridSize ?? appStore.gridSize);
+        syncProjectLayoutState(projectId, layout.buildings.length > 0 ? layout.buildings : projectBuildings, layout.gridSize ?? appStore.gridSize, layout.blueprintTransform ?? appStore.blueprintTransform);
         appStore.currentProjectLayoutStatus = 'ready';
         appStore.currentProjectLayoutMessage = 'Layout guardado correctamente.';
         return layout;

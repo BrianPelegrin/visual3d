@@ -35,6 +35,18 @@ const router = createRouter({
       component: () => import('../views/ProjectUnitsView.vue')
     },
     {
+      path: '/settings',
+      name: 'settings',
+      component: () => import('../views/settings/SettingsView.vue'),
+      meta: { requiresAdmin: true }
+    },
+    {
+      path: '/settings/colors',
+      name: 'settings-colors',
+      component: () => import('../views/settings/ColorsView.vue'),
+      meta: { requiresAdmin: true }
+    },
+    {
       path: '/login',
       name: 'login',
       component: () => import('../views/LoginView.vue')

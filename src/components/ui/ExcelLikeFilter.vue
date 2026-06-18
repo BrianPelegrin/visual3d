@@ -2,7 +2,7 @@
   <div ref="rootEl" class="excel-filter">
     <button class="filter-trigger" :class="{ active: activeFilterCount > 0 || isOpen }" @click="togglePanel">
       <i class="bi bi-funnel"></i>
-      <span>Filters</span>
+      <span>{{ triggerLabel }}</span>
       <span v-if="activeFilterCount > 0" class="filter-badge">{{ activeFilterCount }}</span>
     </button>
 
@@ -10,65 +10,92 @@
       <div class="filter-actions">
         <button class="filter-action" @click="sortItems('asc')">
           <i class="bi bi-sort-alpha-down"></i>
-          Sort A to Z
+          Ordenar A a Z
         </button>
         <button class="filter-action" @click="sortItems('desc')">
           <i class="bi bi-sort-alpha-up"></i>
-          Sort Z to A
+          Ordenar Z a A
         </button>
         <button class="filter-action danger" @click="clearAllFilters">
           <i class="bi bi-x-circle"></i>
-          Clear All Filters
+          Limpiar filtros
         </button>
       </div>
 
       <div class="filter-section">
-        <div class="filter-section-title">Fields</div>
-        <input v-model="fieldSearch" class="filter-search" type="text" placeholder="Search fields" />
+        <div class="filter-section-title">Campos</div>
+        <input v-model="fieldSearch" class="filter-search" type="text" placeholder="Buscar campos" />
         <div class="field-list">
           <label v-for="field in visibleFilterFields" :key="field.key" class="field-option">
             <input v-model="draftSelectedFields" type="checkbox" :value="field.key" />
             <span>{{ field.label }}</span>
           </label>
-          <div v-if="visibleFilterFields.length === 0" class="empty-filter-state">No fields found</div>
+          <div v-if="visibleFilterFields.length === 0" class="empty-filter-state">No se encontraron campos</div>
         </div>
       </div>
 
       <div class="filter-section">
-        <div class="filter-section-title">Filter values</div>
-        <div class="filter-help">Booleanos usan Si/No. Fechas y montos usan rango Desde/Hasta.</div>
+        <div class="filter-section-title">Valores del filtro</div>
+        <div class="filter-help">Booleanos usan Sí/No. Fechas y montos usan rango Desde/Hasta.</div>
 
         <div v-if="draftSelectedFields.length === 0" class="empty-filter-state">
-          Select fields to add filter values.
+          Selecciona campos para agregar valores de filtro.
         </div>
 
         <div v-for="fieldKey in draftSelectedFields" :key="fieldKey" class="value-filter-row">
           <label>{{ fieldLabel(fieldKey) }}</label>
           <select v-if="fieldKind(fieldKey) === 'boolean'" v-model="draftValues[fieldKey]">
             <option value="">Todos</option>
-            <option value="true">Si</option>
+            <option value="true">Sí</option>
             <option value="false">No</option>
           </select>
           <div v-else-if="fieldKind(fieldKey) === 'date'" class="range-filter-inputs">
-            <input v-model="draftRanges[fieldKey].from" type="date" aria-label="Desde" />
-            <input v-model="draftRanges[fieldKey].to" type="date" aria-label="Hasta" />
+            <label class="range-filter-field">
+              <span>Desde</span>
+              <input v-model="draftRanges[fieldKey].from" type="date" aria-label="Desde" />
+            </label>
+            <label class="range-filter-field">
+              <span>Hasta</span>
+              <input v-model="draftRanges[fieldKey].to" type="date" aria-label="Hasta" />
+            </label>
           </div>
           <div v-else-if="fieldKind(fieldKey) === 'number'" class="range-filter-inputs">
-            <input v-model="draftRanges[fieldKey].from" type="number" step="0.01" placeholder="Desde" />
-            <input v-model="draftRanges[fieldKey].to" type="number" step="0.01" placeholder="Hasta" />
+            <label class="range-filter-field">
+              <span>Desde</span>
+              <input v-model="draftRanges[fieldKey].from" type="number" step="0.01" placeholder="Desde" />
+            </label>
+            <label class="range-filter-field">
+              <span>Hasta</span>
+              <input v-model="draftRanges[fieldKey].to" type="number" step="0.01" placeholder="Hasta" />
+            </label>
           </div>
-          <input
-            v-else
-            v-model="draftValues[fieldKey]"
-            type="text"
-            :placeholder="`Contiene ${fieldLabel(fieldKey)}`"
-          />
+          <template v-else>
+            <input
+              v-model="draftValues[fieldKey]"
+              type="text"
+              :placeholder="`Contiene ${fieldLabel(fieldKey)}`"
+            />
+            <div v-if="getUniqueTextValues(fieldKey).length > 0" class="text-value-list">
+              <label class="text-value-option">
+                <input
+                  :checked="isAllTextValuesSelected(fieldKey)"
+                  type="checkbox"
+                  @change="toggleAllTextValues(fieldKey, $event)"
+                >
+                <span>Seleccionar todos</span>
+              </label>
+              <label v-for="option in getUniqueTextValues(fieldKey)" :key="`${fieldKey}-${option.normalized}`" class="text-value-option">
+                <input v-model="draftTextSelections[fieldKey]" type="checkbox" :value="option.value">
+                <span>{{ option.label }}</span>
+              </label>
+            </div>
+          </template>
         </div>
       </div>
 
       <div class="filter-footer">
-        <button class="btn-cancel" @click="cancelPanel">Cancel</button>
-        <button class="btn-ok" @click="applyDraftFilters">OK</button>
+        <button class="btn-cancel" @click="cancelPanel">Cancelar</button>
+        <button class="btn-ok" @click="applyDraftFilters">Aplicar</button>
       </div>
     </div>
   </div>
@@ -76,6 +103,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { parseDateValue } from '../../utils/normalizers';
 
 export type JsonRecord = Record<string, unknown>;
 
@@ -89,8 +117,10 @@ export interface ActiveJsonFilter {
   value: string;
 }
 
-type FilterKind = 'text' | 'boolean' | 'date' | 'number';
+export type FilterKind = 'text' | 'boolean' | 'date' | 'number';
 type RangeFilterValue = { from: string; to: string };
+type TextFilterOption = { value: string; label: string; normalized: string };
+type FilterSortDirection = 'asc' | 'desc' | null;
 
 export interface FilterResult<T = unknown> {
   filteredItems: T[];
@@ -101,9 +131,15 @@ const props = withDefaults(defineProps<{
   items: unknown[];
   excludeFields?: string[];
   visibleFields?: string[];
+  fieldLabels?: Record<string, string>;
+  fieldTypes?: Record<string, FilterKind>;
+  triggerLabel?: string;
 }>(), {
   excludeFields: () => [],
-  visibleFields: () => []
+  visibleFields: () => [],
+  fieldLabels: () => ({}),
+  fieldTypes: () => ({}),
+  triggerLabel: 'Filtros'
 });
 
 const emit = defineEmits<{
@@ -120,6 +156,9 @@ const draftValues = reactive<Record<string, string>>({});
 const appliedValues = reactive<Record<string, string>>({});
 const draftRanges = reactive<Record<string, RangeFilterValue>>({});
 const appliedRanges = reactive<Record<string, RangeFilterValue>>({});
+const draftTextSelections = reactive<Record<string, string[]>>({});
+const appliedTextSelections = reactive<Record<string, string[]>>({});
+const filterSortDirection = ref<FilterSortDirection>(null);
 
 const normalizeText = (value: unknown) => String(value ?? '')
   .trim()
@@ -143,11 +182,18 @@ const parseNumberValue = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const parseDateTime = (value: unknown) => {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.getTime();
-  if (typeof value !== 'string' || value.trim() === '') return null;
-  const timestamp = Date.parse(value);
-  return Number.isNaN(timestamp) ? null : timestamp;
+const toLocalDayTimestamp = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+
+const parseDateDay = (value: unknown) => {
+  const date = parseDateValue(value);
+  return date ? toLocalDayTimestamp(date) : null;
+};
+
+const parseInputDateDay = (value: string) => {
+  if (!value) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  return new Date(year, month - 1, day).getTime();
 };
 
 const ensureRange = (target: Record<string, RangeFilterValue>, field: string) => {
@@ -161,6 +207,49 @@ const getFieldValues = (field: string) =>
   props.items
     .map((item) => ((item ?? {}) as JsonRecord)[field])
     .filter((value) => value !== null && value !== undefined && value !== '');
+
+const getUniqueTextValues = (field: string): TextFilterOption[] => {
+  const options = new Map<string, TextFilterOption>();
+
+  getFieldValues(field).forEach((value) => {
+    const label = toSearchableValue(value).trim();
+    const normalized = normalizeText(label);
+    if (!normalized || options.has(normalized)) return;
+    options.set(normalized, { value: label, label, normalized });
+  });
+
+  const sortedOptions = [...options.values()].sort((a, b) => a.label.localeCompare(b.label, 'es', { numeric: true }));
+  return filterSortDirection.value === 'desc' ? sortedOptions.reverse() : sortedOptions;
+};
+
+const isAllTextValuesSelected = (field: string) => {
+  const options = getUniqueTextValues(field);
+  const selected = draftTextSelections[field] ?? [];
+  return options.length > 0 && selected.length === options.length;
+};
+
+const toggleAllTextValues = (field: string, event: Event) => {
+  const checked = (event.target as HTMLInputElement).checked;
+  draftTextSelections[field] = checked
+    ? getUniqueTextValues(field).map((option) => option.value)
+    : [];
+};
+
+const normalizeBooleanToken = (value: unknown) => normalizeText(value)
+  .replace(/[^a-z0-9]+/g, '');
+
+const parseBooleanLike = (value: unknown): boolean | null => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return value > 0;
+  if (typeof value !== 'string') return null;
+
+  const token = normalizeBooleanToken(value);
+  if (['true', 'si', 's', 'yes', 'y', '1', 'entregado', 'pagado'].includes(token)) return true;
+  if (['false', 'no', 'n', '0', 'pendiente'].includes(token)) return false;
+  return null;
+};
+
+const isRobustBooleanLike = (value: unknown) => parseBooleanLike(value) !== null || isBooleanLike(value);
 
 const isBooleanLike = (value: unknown) => {
   if (typeof value === 'boolean') return true;
@@ -196,16 +285,27 @@ const filterableFields = computed<FilterableField[]>(() => {
     }
   }
 
-  return [...fields]
-    .sort((a, b) => a.localeCompare(b))
-    .map((key) => ({ key, label: formatFieldLabel(key) }));
+  const orderedFields = hasAllowList
+    ? props.visibleFields.filter((field) => fields.has(field))
+    : [...fields].sort((a, b) => a.localeCompare(b));
+
+  return orderedFields.map((key) => ({ key, label: props.fieldLabels[key] ?? formatFieldLabel(key) }));
 });
 
 const visibleFilterFields = computed(() => {
   const search = normalizeText(fieldSearch.value);
-  if (!search) return filterableFields.value;
-  return filterableFields.value.filter((field) =>
-    normalizeText(field.key).includes(search) || normalizeText(field.label).includes(search)
+  const fields = search
+    ? filterableFields.value.filter((field) =>
+      normalizeText(field.key).includes(search) || normalizeText(field.label).includes(search)
+    )
+    : filterableFields.value;
+
+  if (!filterSortDirection.value) return fields;
+
+  return [...fields].sort((a, b) =>
+    filterSortDirection.value === 'asc'
+      ? a.label.localeCompare(b.label, 'es', { numeric: true })
+      : b.label.localeCompare(a.label, 'es', { numeric: true })
   );
 });
 
@@ -216,6 +316,12 @@ const activeFilters = computed<ActiveJsonFilter[]>(() =>
       if (kind === 'date' || kind === 'number') {
         const range = ensureRange(appliedRanges, field);
         return { field, value: [range.from, range.to].filter(Boolean).join(' - ') };
+      }
+      const selectedTextValues = appliedTextSelections[field] ?? [];
+      const uniqueTextValues = getUniqueTextValues(field);
+      const hasPartialTextSelection = selectedTextValues.length > 0 && selectedTextValues.length < uniqueTextValues.length;
+      if (kind === 'text' && hasPartialTextSelection) {
+        return { field, value: `${appliedTextSelections[field].length} valor(es)` };
       }
       return { field, value: appliedValues[field]?.trim() ?? '' };
     })
@@ -228,11 +334,14 @@ const fieldLabel = (key: string) =>
   filterableFields.value.find((field) => field.key === key)?.label ?? formatFieldLabel(key);
 
 const fieldKind = (field: string): FilterKind => {
+  const configuredKind = props.fieldTypes[field];
+  if (configuredKind) return configuredKind;
+
   const values = getFieldValues(field);
   if (values.length === 0) return 'text';
 
-  if (values.every(isBooleanLike)) return 'boolean';
-  if (isDateFieldKey(field) || values.every((value) => parseDateTime(value) !== null)) return 'date';
+  if (values.every(isRobustBooleanLike)) return 'boolean';
+  if (isDateFieldKey(field) || values.every((value) => parseDateDay(value) !== null)) return 'date';
   if (isAmountFieldKey(field) && values.every((value) => parseNumberValue(value) !== null)) return 'number';
   if (values.every((value) => typeof value === 'number' || parseNumberValue(value) !== null)) return 'number';
 
@@ -246,11 +355,18 @@ const booleanFilterMatches = (value: unknown, expected: string) => {
   return expected === 'true' ? actual : !actual;
 };
 
+const robustBooleanFilterMatches = (value: unknown, expected: string) => {
+  if (!expected) return true;
+  const actual = parseBooleanLike(value);
+  if (actual === null) return booleanFilterMatches(value, expected);
+  return expected === 'true' ? actual : !actual;
+};
+
 const dateRangeMatches = (value: unknown, range: RangeFilterValue) => {
-  const timestamp = parseDateTime(value);
+  const timestamp = parseDateDay(value);
   if (timestamp === null) return false;
-  const from = range.from ? Date.parse(`${range.from}T00:00:00`) : null;
-  const to = range.to ? Date.parse(`${range.to}T23:59:59`) : null;
+  const from = parseInputDateDay(range.from);
+  const to = parseInputDateDay(range.to);
   if (from !== null && timestamp < from) return false;
   if (to !== null && timestamp > to) return false;
   return true;
@@ -273,10 +389,16 @@ const filterItems = (items: unknown[], filters: ActiveJsonFilter[]) => {
     filters.every((filter) => {
       const value = ((item ?? {}) as JsonRecord)[filter.field];
       const kind = fieldKind(filter.field);
-      if (kind === 'boolean') return booleanFilterMatches(value, appliedValues[filter.field] ?? '');
+      if (kind === 'boolean') return robustBooleanFilterMatches(value, appliedValues[filter.field] ?? '');
       if (kind === 'date') return dateRangeMatches(value, ensureRange(appliedRanges, filter.field));
       if (kind === 'number') return numberRangeMatches(value, ensureRange(appliedRanges, filter.field));
-      return normalizeText(toSearchableValue(value)).includes(normalizeText(filter.value));
+      const selectedValues = appliedTextSelections[filter.field] ?? [];
+      const normalizedValue = normalizeText(toSearchableValue(value));
+      const matchesSelection = selectedValues.length === 0
+        || selectedValues.some((selected) => normalizeText(selected) === normalizedValue);
+      const searchValue = appliedValues[filter.field]?.trim() ?? '';
+      const matchesSearch = !searchValue || normalizedValue.includes(normalizeText(searchValue));
+      return matchesSelection && matchesSearch;
     })
   );
 };
@@ -294,6 +416,43 @@ const emitClearResult = (items = [...props.items]) => {
   emit('clear', buildFilterResult(items));
 };
 
+const pruneUnavailableFilters = () => {
+  const availableFields = new Set(filterableFields.value.map((field) => field.key));
+  const keepAvailable = (field: string) => availableFields.has(field);
+
+  appliedSelectedFields.value = appliedSelectedFields.value.filter(keepAvailable);
+  draftSelectedFields.value = draftSelectedFields.value.filter(keepAvailable);
+
+  for (const field of Object.keys(appliedValues)) {
+    if (!availableFields.has(field)) delete appliedValues[field];
+  }
+  for (const field of Object.keys(draftValues)) {
+    if (!availableFields.has(field)) delete draftValues[field];
+  }
+  for (const field of Object.keys(appliedRanges)) {
+    if (!availableFields.has(field)) delete appliedRanges[field];
+  }
+  for (const field of Object.keys(draftRanges)) {
+    if (!availableFields.has(field)) delete draftRanges[field];
+  }
+  for (const field of Object.keys(appliedTextSelections)) {
+    if (!availableFields.has(field)) {
+      delete appliedTextSelections[field];
+      continue;
+    }
+    const availableValues = new Set(getUniqueTextValues(field).map((option) => normalizeText(option.value)));
+    appliedTextSelections[field] = appliedTextSelections[field].filter((value) => availableValues.has(normalizeText(value)));
+  }
+  for (const field of Object.keys(draftTextSelections)) {
+    if (!availableFields.has(field)) {
+      delete draftTextSelections[field];
+      continue;
+    }
+    const availableValues = new Set(getUniqueTextValues(field).map((option) => normalizeText(option.value)));
+    draftTextSelections[field] = draftTextSelections[field].filter((value) => availableValues.has(normalizeText(value)));
+  }
+};
+
 const syncDraftFromApplied = () => {
   draftSelectedFields.value = [...appliedSelectedFields.value];
   for (const key of Object.keys(draftValues)) {
@@ -302,12 +461,18 @@ const syncDraftFromApplied = () => {
   for (const key of Object.keys(draftRanges)) {
     delete draftRanges[key];
   }
+  for (const key of Object.keys(draftTextSelections)) {
+    delete draftTextSelections[key];
+  }
   for (const field of draftSelectedFields.value) {
     if (fieldKind(field) === 'date' || fieldKind(field) === 'number') {
       const appliedRange = ensureRange(appliedRanges, field);
       draftRanges[field] = { ...appliedRange };
     } else {
       draftValues[field] = appliedValues[field] ?? '';
+      if (fieldKind(field) === 'text') {
+        draftTextSelections[field] = [...(appliedTextSelections[field] ?? [])];
+      }
     }
   }
 };
@@ -328,12 +493,18 @@ const applyDraftFilters = () => {
   for (const key of Object.keys(appliedRanges)) {
     delete appliedRanges[key];
   }
+  for (const key of Object.keys(appliedTextSelections)) {
+    delete appliedTextSelections[key];
+  }
   for (const field of appliedSelectedFields.value) {
     if (fieldKind(field) === 'date' || fieldKind(field) === 'number') {
       const range = ensureRange(draftRanges, field);
       appliedRanges[field] = { from: range.from ?? '', to: range.to ?? '' };
     } else {
       appliedValues[field] = draftValues[field] ?? '';
+      if (fieldKind(field) === 'text') {
+        appliedTextSelections[field] = [...(draftTextSelections[field] ?? [])];
+      }
     }
   }
 
@@ -361,24 +532,17 @@ const clearAllFilters = () => {
   for (const key of Object.keys(appliedRanges)) {
     delete appliedRanges[key];
   }
+  for (const key of Object.keys(draftTextSelections)) {
+    delete draftTextSelections[key];
+  }
+  for (const key of Object.keys(appliedTextSelections)) {
+    delete appliedTextSelections[key];
+  }
   emitClearResult();
-  isOpen.value = false;
 };
 
 const sortItems = (direction: 'asc' | 'desc') => {
-  const sortField = draftSelectedFields.value[0] ?? filterableFields.value[0]?.key;
-  if (!sortField) {
-    emitAppliedResult([...props.items]);
-    return;
-  }
-
-  const sortedItems = [...filterItems(props.items, activeFilters.value)].sort((a, b) => {
-    const left = normalizeText(toSearchableValue(((a ?? {}) as JsonRecord)[sortField]));
-    const right = normalizeText(toSearchableValue(((b ?? {}) as JsonRecord)[sortField]));
-    return direction === 'asc' ? left.localeCompare(right) : right.localeCompare(left);
-  });
-
-  emitAppliedResult(sortedItems);
+  filterSortDirection.value = direction;
 };
 
 const onDocumentPointerDown = (event: PointerEvent) => {
@@ -393,9 +557,13 @@ watch(draftSelectedFields, (fields) => {
     if (kind === 'date' || kind === 'number') {
       ensureRange(draftRanges, field);
       delete draftValues[field];
+      delete draftTextSelections[field];
     } else if (draftValues[field] === undefined) {
       draftValues[field] = '';
       delete draftRanges[field];
+      if (kind === 'text' && draftTextSelections[field] === undefined) {
+        draftTextSelections[field] = [];
+      }
     }
   }
 
@@ -410,9 +578,16 @@ watch(draftSelectedFields, (fields) => {
       delete draftRanges[field];
     }
   }
+
+  for (const field of Object.keys(draftTextSelections)) {
+    if (!fields.includes(field)) {
+      delete draftTextSelections[field];
+    }
+  }
 });
 
 watch(() => props.items, () => {
+  pruneUnavailableFilters();
   emitAppliedResult();
 }, { deep: true });
 
@@ -474,7 +649,7 @@ onUnmounted(() => {
   max-height: min(680px, calc(100vh - 140px));
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: auto;
   border: 1px solid #dbe3ef;
   border-radius: 14px;
   background: #ffffff;
@@ -532,8 +707,9 @@ onUnmounted(() => {
 }
 
 .filter-search,
-.value-filter-row input,
-.value-filter-row select {
+.value-filter-row > input,
+.value-filter-row > select,
+.range-filter-inputs input {
   width: 100%;
   min-height: 36px;
   border: 1px solid #dbe3ef;
@@ -545,8 +721,9 @@ onUnmounted(() => {
 }
 
 .filter-search:focus,
-.value-filter-row input:focus,
-.value-filter-row select:focus {
+.value-filter-row > input:focus,
+.value-filter-row > select:focus,
+.range-filter-inputs input:focus {
   border-color: #3b82f6;
   box-shadow: 0 0 0 0.18rem rgba(59, 130, 246, 0.12);
   outline: none;
@@ -556,6 +733,17 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+
+.range-filter-field {
+  display: grid;
+  gap: 4px;
+}
+
+.value-filter-row .range-filter-field span {
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 800;
 }
 
 .field-list {
@@ -584,6 +772,8 @@ onUnmounted(() => {
 }
 
 .field-option input {
+  width: auto;
+  min-height: 0;
   accent-color: #2563eb;
 }
 
@@ -599,6 +789,46 @@ onUnmounted(() => {
   font-weight: 850;
 }
 
+.text-value-list {
+  max-height: 160px;
+  overflow-y: auto;
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.text-value-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 8px;
+  color: #334155;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.value-filter-row .text-value-option {
+  color: #334155;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.text-value-option:hover {
+  background: #ffffff;
+}
+
+.text-value-option input {
+  width: auto;
+  min-height: 0;
+  flex: 0 0 auto;
+  accent-color: #2563eb;
+}
+
 .empty-filter-state {
   color: #94a3b8;
   font-size: 0.82rem;
@@ -612,6 +842,9 @@ onUnmounted(() => {
   gap: 8px;
   padding: 10px 12px;
   background: #f8fafc;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
 }
 
 .btn-cancel,

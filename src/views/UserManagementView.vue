@@ -352,25 +352,12 @@ const doDelete = async () => {
   }
 }
 
-.text-slate-900 { color: #0f172a; }
-.text-slate-700 { color: #334155; }
-.text-slate-500 { color: #64748b; }
-.text-slate-400 { color: #94a3b8; }
-.text-blue-600 { color: #2563eb; }
 .text-red-500 { color: #ef4444; }
-.bg-blue-soft { background: #eff6ff; }
 .bg-red-soft { background: #fef2f2; }
 
 .smaller-text { font-size: 0.75rem; }
 .ls-1 { letter-spacing: 0.05em; }
 
-/* Custom Buttons */
-.btn-white {
-  background: white;
-  color: #64748b;
-  font-weight: 600;
-  border: 1px solid #e2e8f0 !important;
-}
 .btn-primary-custom {
   background: #3b82f6;
   color: white;

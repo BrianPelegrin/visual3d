@@ -383,7 +383,5 @@ const handleSave = async () => {
 }
 
 .fw-800 { font-weight: 800; }
-.text-slate-900 { color: #0f172a; }
 .smaller-text { font-size: 0.75rem; }
-.text-slate-500 { color: #64748b; }
 </style>

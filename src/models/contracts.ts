@@ -1,7 +1,7 @@
 // src/models/contracts.ts
 // Contratos canonicos de integracion FE <-> API
 
-import type { Building, DetailedUnit, Project, User } from './types';
+import type { BlueprintTransform, Building, DetailedUnit, Project, User } from './types';
 
 export interface ApiEnvelope<T> {
   data?: T;
@@ -24,6 +24,7 @@ export type ApiSheetsResponse = string[] | ApiEnvelope<string[]>;
 export interface ApiProjectLayoutPayload {
   projectId?: string;
   gridSize?: number;
+  blueprintTransform?: BlueprintTransform | null;
   buildings?: Building[];
 }
 

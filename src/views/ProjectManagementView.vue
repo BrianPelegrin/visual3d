@@ -505,15 +505,9 @@ const enterEditMode = (id: string) => {
 }
 
 /* Colors & Helpers */
-.text-slate-900 { color: #0f172a; }
-.text-slate-700 { color: #334155; }
-.text-slate-500 { color: #64748b; }
-.text-slate-400 { color: #94a3b8; }
-.text-blue-600 { color: #2563eb; }
 .text-emerald-600 { color: #059669; }
 .text-indigo-600 { color: #4f46e5; }
 .text-red-500 { color: #ef4444; }
-.bg-blue-soft { background: #eff6ff; }
 .bg-red-soft { background: #fef2f2; }
 .bg-slate-100 { background: #f1f5f9; }
 .bg-slate-900 { background: #0f172a; }
@@ -557,7 +551,6 @@ const enterEditMode = (id: string) => {
 
 .bg-slate-100 { background-color: #f1f5f9 !important; }
 
-.text-slate-900 { color: #0f172a; }
 .btn-primary-custom {
   background: #3b82f6;
   color: white;

@@ -7,6 +7,27 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 
 import { globalRulesEngine } from './RulesEngine';
+import type { BlueprintTransform, Building, Unit } from '../models/types';
+
+type UnitVisualFilters = {
+    detailedUnitIds?: number[] | null;
+    status?: string | null;
+    bank?: string | null;
+    hasDebt?: boolean | null;
+    enInspeccion?: boolean | null;
+    legal?: boolean | null;
+    titulo?: boolean | null;
+    descargadaDGII?: boolean | null;
+    saldo?: boolean | null;
+};
+
+type UnitVisualKind = 'body' | 'edges' | 'balcony';
+
+type UnitMaterialState = {
+    color: number | THREE.Color;
+    opacity: number;
+    transparent: boolean;
+};
 
 export class SceneManager {
     public scene: THREE.Scene;
@@ -22,7 +43,18 @@ export class SceneManager {
     private gridHelper: THREE.GridHelper | null = null;
     private currentGridSize: number = 300;
     private blueprintAspectRatio: number = 1;
+    private blueprintLayoutBounds: { centerX: number; centerZ: number; width: number; depth: number } | null = null;
+    private blueprintTransform: BlueprintTransform | null = null;
     private readonly onResizeHandler: () => void;
+    private readonly minCameraY = 0.25;
+    private readonly blueprintBoundsPadding = 1.12;
+    private resizeObserver: ResizeObserver | null = null;
+    private blueprintLoadVersion = 0;
+    private readonly unitGeometry = new THREE.BoxGeometry(1, 1, 1);
+    private readonly unitEdgesGeometry = new THREE.EdgesGeometry(this.unitGeometry);
+    private readonly selectedUnitColor = 0xd97706;
+    private readonly defaultUnitEdgeColor = 0xcbd5e1;
+    private readonly defaultBalconyColor = 0xe2e8f0;
 
     constructor(container: HTMLElement) {
         this.container = container;
@@ -58,28 +90,21 @@ export class SceneManager {
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.05;
         this.controls.zoomToCursor = true;
+        this.controls.maxPolarAngle = Math.PI / 2 - 0.02;
 
-        // 5. Lights
-        this.setupLights();
-
-        // 6. Base Helpers
+        // 5. Base Helpers
         this.setupHelpers();
 
-        // 7. Raycaster
+        // 6. Raycaster
         this.setupRaycaster();
 
         // Event Listeners
         window.addEventListener('resize', this.onResizeHandler);
-    }
-
-    private setupLights() {
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-        this.scene.add(ambientLight);
-
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        directionalLight.position.set(10, 20, 10);
-        directionalLight.castShadow = true;
-        this.scene.add(directionalLight);
+        if (typeof ResizeObserver !== 'undefined') {
+            this.resizeObserver = new ResizeObserver(this.onResizeHandler);
+            this.resizeObserver.observe(this.container);
+        }
+        requestAnimationFrame(this.onResizeHandler);
     }
 
     private setupHelpers() {
@@ -124,14 +149,23 @@ export class SceneManager {
     private animate = () => {
         this.animationId = requestAnimationFrame(this.animate);
         this.controls.update();
+        this.keepCameraAbovePlane();
         this.renderer.render(this.scene, this.camera);
         this.labelRenderer.render(this.scene, this.camera);
+    }
+
+    private keepCameraAbovePlane() {
+        if (this.camera.position.y >= this.minCameraY && this.controls.target.y >= 0) return;
+
+        this.camera.position.y = Math.max(this.camera.position.y, this.minCameraY);
+        this.controls.target.y = Math.max(this.controls.target.y, 0);
     }
 
     private onWindowResize() {
         if (!this.container) return;
         const width = this.container.clientWidth;
         const height = this.container.clientHeight;
+        if (width <= 0 || height <= 0) return;
 
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
@@ -140,15 +174,15 @@ export class SceneManager {
     }
 
     public loadBlueprint(url: string) {
+        const loadVersion = ++this.blueprintLoadVersion;
         const textureLoader = new THREE.TextureLoader();
         textureLoader.load(url, (texture: THREE.Texture) => {
-            // Remove old blueprint if exists (simplified for now)
-            const oldBlueprint = this.scene.getObjectByName('blueprint');
-            if (oldBlueprint) {
-                this.scene.remove(oldBlueprint);
-                (oldBlueprint as THREE.Mesh).geometry.dispose();
-                ((oldBlueprint as THREE.Mesh).material as THREE.Material).dispose();
+            if (loadVersion !== this.blueprintLoadVersion) {
+                texture.dispose();
+                return;
             }
+
+            this.clearBlueprint(false);
 
             // Create flat plane and scale it later according to layout bounds
             const imageAspect = texture.image.width / texture.image.height;
@@ -156,6 +190,8 @@ export class SceneManager {
             const geometry = new THREE.PlaneGeometry(1, 1);
             const material = new THREE.MeshBasicMaterial({
                 map: texture,
+                transparent: true,
+                opacity: this.blueprintTransform?.opacity ?? 1,
                 side: THREE.DoubleSide // make it visible from underneath just in case
             });
 
@@ -178,7 +214,148 @@ export class SceneManager {
         });
     }
 
-    public syncBuildings(buildings: any[], visualFilters: any = null, selectedUnitId: string | null = null) {
+    public clearBlueprint(cancelPendingLoad = true) {
+        if (cancelPendingLoad) {
+            this.blueprintLoadVersion += 1;
+        }
+
+        const oldBlueprint = this.scene.getObjectByName('blueprint') as THREE.Mesh | null;
+        if (!oldBlueprint) return;
+
+        this.scene.remove(oldBlueprint);
+        oldBlueprint.geometry.dispose();
+
+        const material = oldBlueprint.material as THREE.MeshBasicMaterial;
+        if (material.map) {
+            material.map.dispose();
+        }
+        material.dispose();
+
+        if (this.gridHelper) {
+            this.gridHelper.visible = true;
+        }
+    }
+
+    public setBlueprintTransform(transform: BlueprintTransform | null) {
+        this.blueprintTransform = transform;
+        this.updateBlueprintTransform();
+    }
+
+    public getAutoBlueprintTransform(): BlueprintTransform {
+        return this.calculateAutoBlueprintTransform();
+    }
+
+    private disposeObjectResources(object: THREE.Object3D) {
+        const mesh = object as THREE.Mesh;
+        if (mesh.geometry && mesh.geometry !== this.unitGeometry && mesh.geometry !== this.unitEdgesGeometry) {
+            mesh.geometry.dispose();
+        }
+
+        const material = mesh.material;
+        if (!material) return;
+
+        const disposeMaterial = (item: THREE.Material) => {
+            const materialWithMap = item as THREE.Material & { map?: THREE.Texture };
+            if (materialWithMap.map) {
+                materialWithMap.map.dispose();
+            }
+            item.dispose();
+        };
+
+        if (Array.isArray(material)) {
+            material.forEach(disposeMaterial);
+        } else {
+            disposeMaterial(material);
+        }
+    }
+
+    private normalizeText(value: unknown) {
+        return String(value ?? '').trim().toLowerCase();
+    }
+
+    private softenColor(color: number, amount = 0.78) {
+        return new THREE.Color(color).multiplyScalar(amount);
+    }
+
+    private isUnitHighlighted(unit: Unit, visualFilters: UnitVisualFilters | null = null) {
+        if (!visualFilters) return true;
+        if (
+            Array.isArray(visualFilters.detailedUnitIds)
+            && visualFilters.detailedUnitIds.length > 0
+            && (unit.detailedUnitId === null || !visualFilters.detailedUnitIds.includes(unit.detailedUnitId))
+        ) return false;
+        if (visualFilters.status && unit.status !== visualFilters.status) return false;
+        if (visualFilters.bank && this.normalizeText(unit.bank) !== this.normalizeText(visualFilters.bank)) return false;
+        if (visualFilters.hasDebt !== null && visualFilters.hasDebt !== undefined && !!unit.hasDebt !== visualFilters.hasDebt) return false;
+        if (visualFilters.enInspeccion !== null && visualFilters.enInspeccion !== undefined && !!unit.enInspeccion !== visualFilters.enInspeccion) return false;
+        if (visualFilters.legal !== null && visualFilters.legal !== undefined && !!unit.legal !== visualFilters.legal) return false;
+        if (visualFilters.titulo !== null && visualFilters.titulo !== undefined && !!unit.titulo !== visualFilters.titulo) return false;
+        if (visualFilters.descargadaDGII !== null && visualFilters.descargadaDGII !== undefined && !!unit.descargadaDGII !== visualFilters.descargadaDGII) return false;
+        if (visualFilters.saldo !== null && visualFilters.saldo !== undefined && !!unit.saldo !== visualFilters.saldo) return false;
+        return true;
+    }
+
+    private getUnitMaterialState(unit: Unit, kind: UnitVisualKind, visualFilters: UnitVisualFilters | null, selectedUnitId: string | null): UnitMaterialState {
+        const isSelectedUnit = selectedUnitId !== null && unit.id === selectedUnitId;
+        const isHighlighted = this.isUnitHighlighted(unit, visualFilters);
+
+        if (kind === 'edges') {
+            return {
+                color: isSelectedUnit ? this.selectedUnitColor : this.defaultUnitEdgeColor,
+                opacity: isSelectedUnit ? 1 : (isHighlighted ? 0.3 : 0.05),
+                transparent: true
+            };
+        }
+
+        if (kind === 'balcony') {
+            return {
+                color: isSelectedUnit ? this.selectedUnitColor : this.defaultBalconyColor,
+                opacity: isSelectedUnit ? 1 : (isHighlighted ? 1 : 0.15),
+                transparent: isSelectedUnit ? false : !isHighlighted
+            };
+        }
+
+        return {
+            color: isSelectedUnit ? this.selectedUnitColor : this.softenColor(globalRulesEngine.resolveColor(unit)),
+            opacity: isSelectedUnit ? 1 : (isHighlighted ? 1 : 0.15),
+            transparent: !isHighlighted
+        };
+    }
+
+    private applyUnitMaterialState(object: THREE.Object3D, state: UnitMaterialState) {
+        const material = (object as THREE.Mesh | THREE.LineSegments).material;
+        if (!material || Array.isArray(material)) return;
+
+        const visualMaterial = material as THREE.MeshBasicMaterial | THREE.LineBasicMaterial;
+        if (state.color instanceof THREE.Color) {
+            visualMaterial.color.copy(state.color);
+        } else {
+            visualMaterial.color.setHex(state.color);
+        }
+        visualMaterial.opacity = state.opacity;
+        visualMaterial.transparent = state.transparent;
+        visualMaterial.needsUpdate = true;
+    }
+
+    public updateUnitVisualState(visualFilters: UnitVisualFilters | null = null, selectedUnitId: string | null = null) {
+        const buildingsGroup = this.scene.getObjectByName('buildingsGroup');
+        if (!buildingsGroup) return;
+
+        buildingsGroup.traverse((object) => {
+            const kind = object.userData.unitVisualKind as UnitVisualKind | undefined;
+            const unit = object.userData.unitSnapshot as Unit | undefined;
+            if (!kind || !unit) return;
+
+            this.applyUnitMaterialState(
+                object,
+                this.getUnitMaterialState(unit, kind, visualFilters, selectedUnitId)
+            );
+        });
+    }
+
+    public syncBuildings(buildings: Building[], visualFilters: UnitVisualFilters | null = null, selectedUnitId: string | null = null) {
+        this.updateBlueprintLayoutBounds(buildings);
+
         let buildingsGroup = this.scene.getObjectByName('buildingsGroup') as THREE.Group;
         if (!buildingsGroup) {
             buildingsGroup = new THREE.Group();
@@ -196,19 +373,10 @@ export class SceneManager {
                 if ((obj as any).isCSS2DObject) {
                     (obj as any).element.remove();
                 }
-                if ((obj as THREE.Mesh).geometry) (obj as THREE.Mesh).geometry.dispose();
-                if ((obj as THREE.Mesh).material) {
-                    if (Array.isArray((obj as THREE.Mesh).material)) {
-                        ((obj as THREE.Mesh).material as THREE.Material[]).forEach(m => m.dispose());
-                    } else {
-                        ((obj as THREE.Mesh).material as THREE.Material).dispose();
-                    }
-                }
+                this.disposeObjectResources(obj);
             });
             buildingsGroup.remove(child);
         });
-
-        const unitGeometry = new THREE.BoxGeometry(1, 1, 1);
 
         // 2. Update existing or Create new
         buildings.forEach(bld => {
@@ -230,7 +398,7 @@ export class SceneManager {
             const layoutRows = Math.max(1, Math.min(12, Math.round(Number(bld.layoutRows) || 2)));
             const unitsPerFloor = layoutCols * layoutRows;
 
-            const normalizedUnits: Array<{ unit: any; floor: number; slot: number }> = bld.units.map((unit: any, index: number) => {
+            const normalizedUnits: Array<{ unit: Unit; floor: number; slot: number }> = bld.units.map((unit: Unit, index: number) => {
                 const fallbackFloor = Math.floor(index / unitsPerFloor) + 1;
                 const fallbackSlot = index % unitsPerFloor;
                 const floor = typeof unit.floor === 'number' && unit.floor > 0 ? unit.floor : fallbackFloor;
@@ -274,7 +442,7 @@ export class SceneManager {
             // Sync Meshes (recreate units for simplicity but avoid clearing labels)
             const meshesToRemove = group.children.filter(c => !(c as any).isCSS2DObject);
             meshesToRemove.forEach(m => {
-                if ((m as THREE.Mesh).geometry) (m as THREE.Mesh).geometry.dispose();
+                this.disposeObjectResources(m);
                 group.remove(m);
             });
 
@@ -328,42 +496,19 @@ export class SceneManager {
                 return new THREE.Vector3(localX, floorY, localZ);
             };
 
-            const normalizeText = (value: unknown) => String(value ?? '').trim().toLowerCase();
-            const isUnitHighlighted = (unit: any) => {
-                if (!visualFilters) return true;
-                if (Array.isArray(visualFilters.detailedUnitIds) && visualFilters.detailedUnitIds.length > 0 && !visualFilters.detailedUnitIds.includes(unit.detailedUnitId)) return false;
-                if (visualFilters.status && unit.status !== visualFilters.status) return false;
-                if (visualFilters.bank && normalizeText(unit.bank) !== normalizeText(visualFilters.bank)) return false;
-                if (visualFilters.hasDebt !== null && !!unit.hasDebt !== visualFilters.hasDebt) return false;
-                if (visualFilters.enInspeccion !== null && !!unit.enInspeccion !== visualFilters.enInspeccion) return false;
-                if (visualFilters.legal !== null && !!unit.legal !== visualFilters.legal) return false;
-                if (visualFilters.titulo !== null && !!unit.titulo !== visualFilters.titulo) return false;
-                if (visualFilters.descargadaDGII !== null && !!unit.descargadaDGII !== visualFilters.descargadaDGII) return false;
-                if (visualFilters.saldo !== null && !!unit.saldo !== visualFilters.saldo) return false;
-                return true;
-            };
+            normalizedUnits.forEach(({ unit, floor, slot }: { unit: Unit; floor: number; slot: number }) => {
+                const unitBodyState = this.getUnitMaterialState(unit, 'body', visualFilters, selectedUnitId);
 
-            normalizedUnits.forEach(({ unit, floor, slot }: { unit: any; floor: number; slot: number }) => {
-                const colorHex = globalRulesEngine.resolveColor(unit);
-                const isSelectedUnit = selectedUnitId !== null && unit.id === selectedUnitId;
-                
-                // Multi-criteria filter check
-                const isHighlighted = isUnitHighlighted(unit);
-                
                 // 1. Unit Body
-                const uMat = new THREE.MeshStandardMaterial({ 
-                    color: isSelectedUnit ? 0xf59e0b : colorHex,
-                    roughness: 0.3,
-                    metalness: 0.2,
-                    emissive: new THREE.Color(isSelectedUnit ? 0xfbbf24 : colorHex),
-                    emissiveIntensity: isSelectedUnit ? 0.55 : (isHighlighted ? 0.1 : 0),
-                    transparent: !isHighlighted,
-                    opacity: isSelectedUnit ? 1 : (isHighlighted ? 1 : 0.15)
+                const uMat = new THREE.MeshBasicMaterial({
+                    color: unitBodyState.color,
+                    transparent: unitBodyState.transparent,
+                    opacity: unitBodyState.opacity
                 });
-                const uMesh = new THREE.Mesh(unitGeometry, uMat);
+                const uMesh = new THREE.Mesh(this.unitGeometry, uMat);
                 uMesh.scale.set(uW, unitHeight, uD);
                 uMesh.position.copy(getUnitPosition(floor, slot));
-                uMesh.userData = { id: unit.id, buildingId: bld.id, isUnitVisual: true };
+                uMesh.userData = { id: unit.id, buildingId: bld.id, isUnitVisual: true, unitVisualKind: 'body', unitSnapshot: { ...unit } };
                 group.add(uMesh);
 
                 const unitPickGeo = new THREE.BoxGeometry(uW * 1.1, unitHeight * 1.5, uD * 1.1);
@@ -379,22 +524,22 @@ export class SceneManager {
                 group.add(unitPick);
 
                 // 2. Unit Edges (Highlight)
-                const edgesGeo = new THREE.EdgesGeometry(unitGeometry);
+                const unitEdgesState = this.getUnitMaterialState(unit, 'edges', visualFilters, selectedUnitId);
                 const edgesMat = new THREE.LineBasicMaterial({ 
-                    color: isSelectedUnit ? 0xf59e0b : 0xffffff, 
-                    transparent: true, 
-                    opacity: isSelectedUnit ? 1 : (isHighlighted ? 0.3 : 0.05)
+                    color: unitEdgesState.color,
+                    transparent: unitEdgesState.transparent,
+                    opacity: unitEdgesState.opacity
                 });
-                const edgesLine = new THREE.LineSegments(edgesGeo, edgesMat);
+                const edgesLine = new THREE.LineSegments(this.unitEdgesGeometry, edgesMat);
                 edgesLine.scale.set(uW, unitHeight, uD);
                 edgesLine.position.copy(uMesh.position);
-                edgesLine.userData = { id: unit.id, buildingId: bld.id, isUnitVisual: true };
+                edgesLine.userData = { id: unit.id, buildingId: bld.id, isUnitVisual: true, unitVisualKind: 'edges', unitSnapshot: { ...unit } };
                 group.add(edgesLine);
             });
 
             // 3. Add Decorative Base
             const baseGeo = new THREE.BoxGeometry(bld.dimensions.width * 1.02, baseHeight, bld.dimensions.depth * 1.02);
-            const baseMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.9 });
+            const baseMat = new THREE.MeshBasicMaterial({ color: 0x64748b });
             const base = new THREE.Mesh(baseGeo, baseMat);
             base.position.set(0, bodyBottomY - (baseHeight / 2), 0);
             base.userData = { id: bld.id, isBuilding: true };
@@ -403,21 +548,17 @@ export class SceneManager {
             // 4. Add Balconies (Architectural depth)
             const balconyGeo = new THREE.BoxGeometry(uW * 0.55, 0.05, uD * 0.08);
 
-            normalizedUnits.forEach(({ unit, floor, slot }: { unit: any; floor: number; slot: number }) => {
-                const isSelectedUnit = selectedUnitId !== null && unit.id === selectedUnitId;
-                // Determine highlight based on ALL criteria
-                const isHighlighted = isUnitHighlighted(unit);
-
+            normalizedUnits.forEach(({ unit, floor, slot }: { unit: Unit; floor: number; slot: number }) => {
+                const balconyState = this.getUnitMaterialState(unit, 'balcony', visualFilters, selectedUnitId);
                 const basePos = getUnitPosition(floor, slot);
-                const balconyMaterial = new THREE.MeshStandardMaterial({
-                    color: isSelectedUnit ? 0xf59e0b : 0xffffff,
-                    roughness: 0.2,
-                    transparent: isSelectedUnit ? false : !isHighlighted,
-                    opacity: isSelectedUnit ? 1 : (isHighlighted ? 1 : 0.15)
+                const balconyMaterial = new THREE.MeshBasicMaterial({
+                    color: balconyState.color,
+                    transparent: balconyState.transparent,
+                    opacity: balconyState.opacity
                 });
                 const balcony = new THREE.Mesh(balconyGeo, balconyMaterial);
                 balcony.position.set(basePos.x, basePos.y, basePos.z + (uD * 0.5) + 0.01);
-                balcony.userData = { id: unit.id, buildingId: bld.id, isUnitVisual: true };
+                balcony.userData = { id: unit.id, buildingId: bld.id, isUnitVisual: true, unitVisualKind: 'balcony', unitSnapshot: { ...unit } };
                 group.add(balcony);
             });
         });
@@ -426,6 +567,62 @@ export class SceneManager {
         // Without this, depending on async load order between layout and image,
         // the blueprint can keep an old scale and look "descuadrado" across views.
         this.updateBlueprintTransform();
+    }
+
+    private updateBlueprintLayoutBounds(buildings: any[]) {
+        if (!Array.isArray(buildings) || buildings.length === 0) {
+            this.blueprintLayoutBounds = null;
+            return;
+        }
+
+        let minX = Infinity;
+        let maxX = -Infinity;
+        let minZ = Infinity;
+        let maxZ = -Infinity;
+
+        buildings.forEach((building) => {
+            const width = Math.max(0, Number(building.dimensions?.width) || 0);
+            const depth = Math.max(0, Number(building.dimensions?.depth) || 0);
+            const positionX = Number(building.position?.x);
+            const positionZ = Number(building.position?.z);
+            if (!Number.isFinite(width) || !Number.isFinite(depth) || !Number.isFinite(positionX) || !Number.isFinite(positionZ)) return;
+
+            const rotation = THREE.MathUtils.degToRad(Number(building.rotationY) || 0);
+            const cos = Math.cos(rotation);
+            const sin = Math.sin(rotation);
+            const halfWidth = width / 2;
+            const halfDepth = depth / 2;
+            const corners = [
+                { x: -halfWidth, z: -halfDepth },
+                { x: halfWidth, z: -halfDepth },
+                { x: halfWidth, z: halfDepth },
+                { x: -halfWidth, z: halfDepth }
+            ];
+
+            corners.forEach((corner) => {
+                const worldX = positionX + (corner.x * cos) - (corner.z * sin);
+                const worldZ = positionZ + (corner.x * sin) + (corner.z * cos);
+                minX = Math.min(minX, worldX);
+                maxX = Math.max(maxX, worldX);
+                minZ = Math.min(minZ, worldZ);
+                maxZ = Math.max(maxZ, worldZ);
+            });
+        });
+
+        if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minZ) || !Number.isFinite(maxZ)) {
+            this.blueprintLayoutBounds = null;
+            return;
+        }
+
+        const width = Math.max(1, (maxX - minX) * this.blueprintBoundsPadding);
+        const depth = Math.max(1, (maxZ - minZ) * this.blueprintBoundsPadding);
+
+        this.blueprintLayoutBounds = {
+            centerX: (minX + maxX) / 2,
+            centerZ: (minZ + maxZ) / 2,
+            width,
+            depth
+        };
     }
 
     // Invisible floor plane used for raycasting drag positions
@@ -570,8 +767,22 @@ export class SceneManager {
         const blueprint = this.scene.getObjectByName('blueprint') as THREE.Mesh | null;
         if (!blueprint) return;
 
-        const targetWidth = this.currentGridSize * 0.8;
-        const targetDepth = this.currentGridSize * 0.8;
+        const transform = this.blueprintTransform ?? this.calculateAutoBlueprintTransform();
+        blueprint.scale.set(transform.width, transform.depth, 1);
+        blueprint.rotation.set(-Math.PI / 2, 0, THREE.MathUtils.degToRad(transform.rotationY));
+        blueprint.position.set(transform.x, -0.01, transform.z);
+
+        const material = blueprint.material as THREE.MeshBasicMaterial;
+        material.opacity = transform.opacity;
+        material.transparent = transform.opacity < 1;
+    }
+
+    private calculateAutoBlueprintTransform(): BlueprintTransform {
+        const targetBounds = this.blueprintLayoutBounds;
+        const targetWidth = targetBounds?.width ?? this.currentGridSize * 0.8;
+        const targetDepth = targetBounds?.depth ?? this.currentGridSize * 0.8;
+        const centerX = targetBounds?.centerX ?? 0;
+        const centerZ = targetBounds?.centerZ ?? 0;
 
         const targetRatio = targetWidth / Math.max(targetDepth, 0.0001);
         let planeWidth: number;
@@ -586,8 +797,14 @@ export class SceneManager {
             planeDepth = planeWidth / this.blueprintAspectRatio;
         }
 
-        blueprint.scale.set(planeWidth, planeDepth, 1);
-        blueprint.position.set(0, -0.01, 0);
+        return {
+            x: centerX,
+            z: centerZ,
+            width: planeWidth,
+            depth: planeDepth,
+            rotationY: 0,
+            opacity: 1
+        };
     }
 
     private findBuildingGroup(object: THREE.Object3D): THREE.Group | null {
@@ -611,12 +828,16 @@ export class SceneManager {
     public dispose() {
         this.stop();
         window.removeEventListener('resize', this.onResizeHandler);
+        this.resizeObserver?.disconnect();
+        this.clearBlueprint();
         if (this.container && this.renderer.domElement) {
             this.container.removeChild(this.renderer.domElement);
         }
         if (this.container && this.labelRenderer.domElement) {
             this.container.removeChild(this.labelRenderer.domElement);
         }
+        this.unitEdgesGeometry.dispose();
+        this.unitGeometry.dispose();
         this.renderer.dispose();
     }
 }

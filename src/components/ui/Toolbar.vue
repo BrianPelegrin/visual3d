@@ -38,17 +38,6 @@
       <div class="spacer toolbar-desktop-only"></div>
 
       <div class="toolbar-desktop-only desktop-controls d-flex align-items-center gap-2">
-      <div v-if="appMode === 'edit' && !re_isViewer()" class="control-group d-flex align-items-center gap-2">
-        <div class="control-label">
-          <i class="bi bi-grid-3x3"></i>
-          <span class="d-none d-lg-inline">Suelo</span>
-        </div>
-          <div class="range-container">
-            <input type="range" class="glass-range" id="gridSizeRange" min="20" max="400" step="10" :value="gridSize" @input="updateGridSize">
-            <span class="range-value">{{ gridSize }}m</span>
-          </div>
-        </div>
-
         <div v-if="appMode === 'edit' && !re_isViewer()" class="control-group d-flex align-items-center gap-2">
           <div class="form-check form-switch m-0">
             <input class="form-check-input" type="checkbox" role="switch" :checked="dragBuildingsEnabled" @change="toggleDragBuildings">
@@ -92,83 +81,74 @@
           </div>
         </div>
 
-        <div class="position-relative">
-          <button class="btn-glass-filter" :class="{ active: showFilters || hasActiveFilters }" @click="showFilters = !showFilters" title="Filtros 3D">
-            <i class="bi bi-funnel-fill" v-if="hasActiveFilters"></i>
-            <i class="bi bi-funnel" v-else></i>
-            <span class="d-none d-md-inline">Resaltar</span>
-            <span v-if="hasActiveFilters" class="filter-count">{{ activeFilterCount }}</span>
+        <div v-if="appMode === 'edit' && re_canEditData()" class="position-relative">
+          <button class="btn-glass-filter" :class="{ active: showBlueprintControls || hasBlueprintTransform }" @click="toggleBlueprintControls" title="Ajustar plano">
+            <i class="bi bi-bounding-box"></i>
+            <span class="d-none d-lg-inline">Plano</span>
           </button>
 
-          <div v-if="showFilters" class="filters-panel shadow-lg p-3 rounded-4">
+          <div v-if="showBlueprintControls" class="blueprint-controls-panel shadow-lg p-3 rounded-4">
             <div class="d-flex justify-content-between align-items-center mb-3">
-              <h6 class="mb-0 fw-bold smaller-text text-uppercase ls-1">Filtros Visuales</h6>
-              <button class="btn-close-sm" @click="showFilters = false"><i class="bi bi-x-lg"></i></button>
+              <h6 class="mb-0 fw-bold smaller-text text-uppercase ls-1">Ajustar Plano</h6>
+              <button class="btn-close-sm" @click="showBlueprintControls = false"><i class="bi bi-x-lg"></i></button>
+            </div>
+            <div class="blueprint-slider-row mb-3">
+              <div class="control-label"><i class="bi bi-grid-3x3"></i><span>Suelo</span></div>
+              <input type="range" class="glass-range blueprint-range" id="gridSizeRange" min="20" max="400" step="10" :value="gridSize" @input="updateGridSize">
+              <span class="range-value">{{ gridSize }}m</span>
+            </div>
+            <div class="blueprint-controls-grid">
+              <label>
+                <span>X</span>
+                <input type="number" step="0.1" :value="blueprintTransform.x" @input="updateBlueprintTransformValue('x', $event)">
+              </label>
+              <label>
+                <span>Z</span>
+                <input type="number" step="0.1" :value="blueprintTransform.z" @input="updateBlueprintTransformValue('z', $event)">
+              </label>
+              <label>
+                <span>Ancho</span>
+                <input type="number" min="1" step="0.5" :value="blueprintTransform.width" @input="updateBlueprintTransformValue('width', $event)">
+              </label>
+              <label>
+                <span>Largo</span>
+                <input type="number" min="1" step="0.5" :value="blueprintTransform.depth" @input="updateBlueprintTransformValue('depth', $event)">
+              </label>
             </div>
 
-            <div class="filter-item mb-3">
-              <label class="filter-label">Estado</label>
-              <select class="form-select form-select-sm" :value="visualFilters.status || ''" @change="updateFilter('status', $event)">
-                <option value="">Todos</option>
-                <option value="delivered">Entregado</option>
-                <option value="financing">Financiamiento</option>
-                <option value="inspection">Inspección</option>
-                <option value="sold">Vendido</option>
-                <option value="observation">Observación</option>
-                <option value="available">Disponible</option>
-              </select>
+            <div class="blueprint-slider-row mt-3">
+              <div class="control-label"><i class="bi bi-arrow-clockwise"></i><span>Rotación</span></div>
+              <input type="range" class="glass-range blueprint-range" min="0" max="359" step="1" :value="blueprintTransform.rotationY" @input="updateBlueprintTransformValue('rotationY', $event)">
+              <span class="range-value">{{ Math.round(blueprintTransform.rotationY) }}°</span>
+            </div>
+            <div class="blueprint-slider-row mt-3">
+              <div class="control-label"><i class="bi bi-layers"></i><span>Opacidad</span></div>
+              <input type="range" class="glass-range blueprint-range" min="0.15" max="1" step="0.05" :value="blueprintTransform.opacity" @input="updateBlueprintTransformValue('opacity', $event)">
+              <span class="range-value">{{ Math.round(blueprintTransform.opacity * 100) }}%</span>
             </div>
 
-            <div class="filter-item mb-3">
-              <label class="filter-label">Banco</label>
-              <select class="form-select form-select-sm" :value="visualFilters.bank || ''" @change="updateFilter('bank', $event)">
-                <option value="">Todos</option>
-                <option v-for="b in banks" :key="b" :value="b">{{ b }}</option>
-              </select>
+            <div class="blueprint-actions mt-3">
+              <button class="btn-glass-primary justify-content-center" @click="autoFitBlueprint">
+                <i class="bi bi-aspect-ratio"></i>
+                <span>Auto-ajustar</span>
+              </button>
+              <button class="btn-glass-outline justify-content-center" @click="resetBlueprintTransform" title="Volver al ajuste automático">
+                <i class="bi bi-arrow-counterclockwise"></i>
+              </button>
             </div>
-
-            <div class="filter-item mb-3">
-              <div class="d-flex justify-content-between align-items-center">
-                <label class="filter-label mb-0">Con Deuda</label>
-                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" :checked="visualFilters.hasDebt === true" @change="toggleFilter('hasDebt', $event)"></div>
-              </div>
-            </div>
-
-            <div class="filter-item mb-3">
-              <div class="d-flex justify-content-between align-items-center">
-                <label class="filter-label mb-0">Inspección</label>
-                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" :checked="visualFilters.enInspeccion === true" @change="toggleFilter('enInspeccion', $event)"></div>
-              </div>
-            </div>
-            <div class="filter-item mb-3">
-              <div class="d-flex justify-content-between align-items-center">
-                <label class="filter-label mb-0">Legal</label>
-                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" :checked="visualFilters.legal === true" @change="toggleFilter('legal', $event)"></div>
-              </div>
-            </div>
-            <div class="filter-item mb-3">
-              <div class="d-flex justify-content-between align-items-center">
-                <label class="filter-label mb-0">Título</label>
-                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" :checked="visualFilters.titulo === true" @change="toggleFilter('titulo', $event)"></div>
-              </div>
-            </div>
-            <div class="filter-item mb-3">
-              <div class="d-flex justify-content-between align-items-center">
-                <label class="filter-label mb-0">DGII</label>
-                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" :checked="visualFilters.descargadaDGII === true" @change="toggleFilter('descargadaDGII', $event)"></div>
-              </div>
-            </div>
-            <div class="filter-item mb-3">
-              <div class="d-flex justify-content-between align-items-center">
-                <label class="filter-label mb-0">Saldado</label>
-                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" :checked="visualFilters.saldo === true" @change="toggleFilter('saldo', $event)"></div>
-              </div>
-            </div>
-
-            <button class="btn btn-outline-danger btn-sm w-100 mt-2 py-2" @click="clearAllFilters">
-              <i class="bi bi-trash3 me-2"></i> Limpiar Filtros
-            </button>
           </div>
+        </div>
+
+        <div v-if="showEditorFilters" class="toolbar-editor-filter">
+          <ExcelLikeFilter
+            :items="appStore.detailedUnits"
+            :visible-fields="dashboardFilterFields"
+            :field-labels="dashboardFilterLabels"
+            :field-types="dashboardFilterTypes"
+            trigger-label="Filtros"
+            @apply="handleEditorFilterApply"
+            @clear="handleEditorFilterClear"
+          />
         </div>
 
         <button class="btn-glass-outline" @click="emit('open-color-guide')" title="Guía de Colores">
@@ -207,16 +187,8 @@
         </div>
 
         <div v-if="appMode === 'edit' && !re_isViewer()" class="mobile-section">
-          <div class="mobile-section-title">Suelo</div>
-          <div class="control-group d-flex align-items-center gap-2 mobile-control-group">
-            <div class="control-label"><i class="bi bi-grid-3x3"></i><span>Suelo</span></div>
-            <div class="range-container mobile-range-container">
-              <input type="range" class="glass-range" id="gridSizeRangeMobile" min="20" max="400" step="10" :value="gridSize" @input="updateGridSize">
-              <span class="range-value">{{ gridSize }}m</span>
-            </div>
-          </div>
-
-          <div class="control-group d-flex align-items-center justify-content-between gap-2 mt-3">
+          <div class="mobile-section-title">Edición</div>
+          <div class="control-group d-flex align-items-center justify-content-between gap-2">
             <div class="control-label"><i class="bi bi-arrows-move"></i><span>Mover edificios</span></div>
             <div class="form-check form-switch m-0">
               <input class="form-check-input" type="checkbox" role="switch" :checked="dragBuildingsEnabled" @change="toggleDragBuildings">
@@ -249,44 +221,66 @@
           </div>
         </div>
 
-        <div class="mobile-section position-relative">
-          <div class="mobile-section-title">Filtros</div>
-          <button class="btn-glass-filter w-100 justify-content-between" :class="{ active: showFilters || hasActiveFilters }" @click="showFilters = !showFilters" title="Filtros 3D">
-            <span class="d-flex align-items-center gap-2"><i class="bi bi-funnel-fill" v-if="hasActiveFilters"></i><i class="bi bi-funnel" v-else></i><span>Resaltar</span></span>
-            <span v-if="hasActiveFilters" class="filter-count position-static">{{ activeFilterCount }}</span>
-          </button>
-          <div v-if="showFilters" class="filters-panel shadow-lg p-3 rounded-4 mobile-filters-panel">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-              <h6 class="mb-0 fw-bold smaller-text text-uppercase ls-1">Filtros Visuales</h6>
-              <button class="btn-close-sm" @click="showFilters = false"><i class="bi bi-x-lg"></i></button>
+        <div v-if="appMode === 'edit' && re_canEditData()" class="mobile-section">
+          <div class="mobile-section-title">Plano</div>
+          <div class="global-dimensions-card">
+            <div class="blueprint-slider-row mb-3">
+              <div class="control-label"><i class="bi bi-grid-3x3"></i><span>Suelo</span></div>
+              <input type="range" class="glass-range blueprint-range" id="gridSizeRangeMobile" min="20" max="400" step="10" :value="gridSize" @input="updateGridSize">
+              <span class="range-value">{{ gridSize }}m</span>
             </div>
-            <div class="filter-item mb-3">
-              <label class="filter-label">Estado</label>
-              <select class="form-select form-select-sm" :value="visualFilters.status || ''" @change="updateFilter('status', $event)">
-                <option value="">Todos</option>
-                <option value="delivered">Entregado</option>
-                <option value="financing">Financiamiento</option>
-                <option value="inspection">Inspección</option>
-                <option value="sold">Vendido</option>
-                <option value="observation">Observación</option>
-                <option value="available">Disponible</option>
-              </select>
+            <div class="blueprint-controls-grid">
+              <label>
+                <span>X</span>
+                <input type="number" step="0.1" :value="blueprintTransform.x" @input="updateBlueprintTransformValue('x', $event)">
+              </label>
+              <label>
+                <span>Z</span>
+                <input type="number" step="0.1" :value="blueprintTransform.z" @input="updateBlueprintTransformValue('z', $event)">
+              </label>
+              <label>
+                <span>Ancho</span>
+                <input type="number" min="1" step="0.5" :value="blueprintTransform.width" @input="updateBlueprintTransformValue('width', $event)">
+              </label>
+              <label>
+                <span>Largo</span>
+                <input type="number" min="1" step="0.5" :value="blueprintTransform.depth" @input="updateBlueprintTransformValue('depth', $event)">
+              </label>
             </div>
-            <div class="filter-item mb-3">
-              <label class="filter-label">Banco</label>
-              <select class="form-select form-select-sm" :value="visualFilters.bank || ''" @change="updateFilter('bank', $event)">
-                <option value="">Todos</option>
-                <option v-for="b in banks" :key="b" :value="b">{{ b }}</option>
-              </select>
+            <div class="blueprint-slider-row mt-3">
+              <div class="control-label"><i class="bi bi-arrow-clockwise"></i><span>Rotación</span></div>
+              <input type="range" class="glass-range blueprint-range" min="0" max="359" step="1" :value="blueprintTransform.rotationY" @input="updateBlueprintTransformValue('rotationY', $event)">
+              <span class="range-value">{{ Math.round(blueprintTransform.rotationY) }}°</span>
             </div>
-            <div class="filter-item mb-3"><div class="d-flex justify-content-between align-items-center"><label class="filter-label mb-0">Con Deuda</label><div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" :checked="visualFilters.hasDebt === true" @change="toggleFilter('hasDebt', $event)"></div></div></div>
-            <div class="filter-item mb-3"><div class="d-flex justify-content-between align-items-center"><label class="filter-label mb-0">Inspección</label><div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" :checked="visualFilters.enInspeccion === true" @change="toggleFilter('enInspeccion', $event)"></div></div></div>
-            <div class="filter-item mb-3"><div class="d-flex justify-content-between align-items-center"><label class="filter-label mb-0">Legal</label><div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" :checked="visualFilters.legal === true" @change="toggleFilter('legal', $event)"></div></div></div>
-            <div class="filter-item mb-3"><div class="d-flex justify-content-between align-items-center"><label class="filter-label mb-0">Título</label><div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" :checked="visualFilters.titulo === true" @change="toggleFilter('titulo', $event)"></div></div></div>
-            <div class="filter-item mb-3"><div class="d-flex justify-content-between align-items-center"><label class="filter-label mb-0">DGII</label><div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" :checked="visualFilters.descargadaDGII === true" @change="toggleFilter('descargadaDGII', $event)"></div></div></div>
-            <div class="filter-item mb-3"><div class="d-flex justify-content-between align-items-center"><label class="filter-label mb-0">Saldado</label><div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" :checked="visualFilters.saldo === true" @change="toggleFilter('saldo', $event)"></div></div></div>
-            <button class="btn btn-outline-danger btn-sm w-100 mt-2 py-2" @click="clearAllFilters"><i class="bi bi-trash3 me-2"></i> Limpiar Filtros</button>
+            <div class="blueprint-slider-row mt-3">
+              <div class="control-label"><i class="bi bi-layers"></i><span>Opacidad</span></div>
+              <input type="range" class="glass-range blueprint-range" min="0.15" max="1" step="0.05" :value="blueprintTransform.opacity" @input="updateBlueprintTransformValue('opacity', $event)">
+              <span class="range-value">{{ Math.round(blueprintTransform.opacity * 100) }}%</span>
+            </div>
+            <div class="blueprint-actions mt-3">
+              <button class="btn-glass-primary w-100 justify-content-center" @click="autoFitBlueprint">
+                <i class="bi bi-aspect-ratio"></i>
+                <span>Auto-ajustar</span>
+              </button>
+              <button class="btn-glass-outline justify-content-center" @click="resetBlueprintTransform">
+                <i class="bi bi-arrow-counterclockwise"></i>
+              </button>
+            </div>
           </div>
+        </div>
+
+        <div v-if="showEditorFilters" class="mobile-section mobile-editor-filter-section">
+          <div class="mobile-section-title">Filtros</div>
+          <ExcelLikeFilter
+            class="mobile-editor-filter"
+            :items="appStore.detailedUnits"
+            :visible-fields="dashboardFilterFields"
+            :field-labels="dashboardFilterLabels"
+            :field-types="dashboardFilterTypes"
+            trigger-label="Filtros"
+            @apply="handleEditorFilterApply"
+            @clear="handleEditorFilterClear"
+          />
         </div>
 
         <div v-if="appMode === 'edit' && re_canEditData()" class="mobile-section">
@@ -321,19 +315,24 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import { appStore, setAppMode, setGridSize, setDragBuildingsEnabled, canEditData, isViewer, setVisualFilters, updateCurrentProjectBuildingDimensions } from '../../store/appStore';
+import { appStore, setAppMode, setGridSize, setDragBuildingsEnabled, canEditData, isViewer, setVisualFilters, setBlueprintTransform, updateCurrentProjectBuildingDimensions } from '../../store/appStore';
+import type { BlueprintTransform } from '../../models/types';
+import ExcelLikeFilter, { type FilterResult } from './ExcelLikeFilter.vue';
+import { dashboardFilterFields, dashboardFilterLabels, dashboardFilterTypes } from '../../utils/dashboardFilterFields';
 
 const re_canEditData = () => canEditData();
 const re_isViewer = () => isViewer();
 const fileInput = ref<HTMLInputElement | null>(null);
 const mobileMenuOpen = ref(false);
 const showGlobalDimensions = ref(false);
+const showBlueprintControls = ref(false);
 const globalWidth = ref(4);
 const globalDepth = ref(4);
 const globalHeight = ref(8);
 
 const emit = defineEmits<{
   (e: 'blueprint-loaded', url: string): void;
+  (e: 'blueprint-auto-fit'): void;
   (e: 'generate-from-apartments'): void;
   (e: 'add-building'): void;
   (e: 'save-layout'): void;
@@ -341,9 +340,10 @@ const emit = defineEmits<{
 }>();
 
 const appMode = computed(() => appStore.appMode);
+const showEditorFilters = computed(() => appMode.value === 'view' || (appMode.value === 'edit' && canEditData()));
 const gridSize = computed(() => appStore.gridSize);
 const dragBuildingsEnabled = computed(() => appStore.dragBuildingsEnabled);
-const visualFilters = computed(() => appStore.visualFilters);
+const hasBlueprintTransform = computed(() => appStore.blueprintTransform !== null);
 const isSaving = computed(() => appStore.currentProjectLayoutStatus === 'saving');
 const projectBuildings = computed(() => appStore.buildings.filter(building => building.projectId === appStore.currentProjectId));
 const totalUnits = computed(() => projectBuildings.value.reduce((acc, building) => acc + building.units.length, 0));
@@ -369,46 +369,107 @@ const averageDimensions = computed(() => {
   };
 });
 
+const blueprintFallbackTransform = computed<BlueprintTransform>(() => {
+  if (projectBuildings.value.length === 0) {
+    return {
+      x: 0,
+      z: 0,
+      width: Math.max(1, gridSize.value * 0.8),
+      depth: Math.max(1, gridSize.value * 0.8),
+      rotationY: 0,
+      opacity: 1
+    };
+  }
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+
+  projectBuildings.value.forEach((building) => {
+    const width = Math.max(0, Number(building.dimensions.width) || 0);
+    const depth = Math.max(0, Number(building.dimensions.depth) || 0);
+    const positionX = Number(building.position.x);
+    const positionZ = Number(building.position.z);
+    const halfWidth = width / 2;
+    const halfDepth = depth / 2;
+    minX = Math.min(minX, positionX - halfWidth);
+    maxX = Math.max(maxX, positionX + halfWidth);
+    minZ = Math.min(minZ, positionZ - halfDepth);
+    maxZ = Math.max(maxZ, positionZ + halfDepth);
+  });
+
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minZ) || !Number.isFinite(maxZ)) {
+    return {
+      x: 0,
+      z: 0,
+      width: Math.max(1, gridSize.value * 0.8),
+      depth: Math.max(1, gridSize.value * 0.8),
+      rotationY: 0,
+      opacity: 1
+    };
+  }
+
+  return {
+    x: Number(((minX + maxX) / 2).toFixed(2)),
+    z: Number(((minZ + maxZ) / 2).toFixed(2)),
+    width: Number(Math.max(1, (maxX - minX) * 1.12).toFixed(2)),
+    depth: Number(Math.max(1, (maxZ - minZ) * 1.12).toFixed(2)),
+    rotationY: 0,
+    opacity: 1
+  };
+});
+
+const blueprintTransform = computed<BlueprintTransform>(() => appStore.blueprintTransform ?? blueprintFallbackTransform.value);
+
 watch(averageDimensions, (dimensions) => {
   globalWidth.value = dimensions.width;
   globalDepth.value = dimensions.depth;
   globalHeight.value = dimensions.height;
 }, { immediate: true });
 
-const showFilters = ref(false);
-const banks = computed(() => {
-  const unique = new Set<string>();
-
-  // Prioritize real apartment dataset banks (current project scope in store)
-  appStore.detailedUnits.forEach((apartment) => {
-    const bank = typeof apartment.banco === 'string' ? apartment.banco.trim() : '';
-    if (bank) unique.add(bank);
-  });
-
-  // Include banks already mapped at 3D unit level as fallback
-  projectBuildings.value.forEach((building) => {
-    building.units.forEach((unit) => {
-      if (typeof unit.bank === 'string' && unit.bank.trim()) {
-        unique.add(unit.bank.trim());
-      }
-    });
-  });
-  return Array.from(unique).sort((a, b) => a.localeCompare(b, 'es'));
-});
-
-const hasActiveFilters = computed(() => visualFilters.value.status !== null || visualFilters.value.bank !== null || visualFilters.value.hasDebt !== null || visualFilters.value.enInspeccion !== null || visualFilters.value.legal !== null || visualFilters.value.titulo !== null || visualFilters.value.descargadaDGII !== null || visualFilters.value.saldo !== null);
-const activeFilterCount = computed(() => [visualFilters.value.status, visualFilters.value.bank, visualFilters.value.hasDebt, visualFilters.value.enInspeccion, visualFilters.value.legal, visualFilters.value.titulo, visualFilters.value.descargadaDGII, visualFilters.value.saldo].filter(value => value !== null && value !== undefined && value !== '').length);
-
 const setMode = (mode: 'edit' | 'view') => setAppMode(mode);
+const toggleBlueprintControls = () => {
+  showBlueprintControls.value = !showBlueprintControls.value;
+  if (showBlueprintControls.value && !appStore.blueprintTransform) {
+    emit('blueprint-auto-fit');
+  }
+};
 const toggleDragBuildings = (event: Event) => {
   const target = event.target as HTMLInputElement;
   setDragBuildingsEnabled(target.checked);
 };
 const updateGridSize = (event: Event) => setGridSize(parseInt((event.target as HTMLInputElement).value));
-const updateFilter = (key: string, event: Event) => setVisualFilters({ [key]: ((event.target as HTMLSelectElement).value === '' ? null : (event.target as HTMLSelectElement).value) as any });
-const toggleFilter = (key: string, event: Event) => setVisualFilters({ [key]: (event.target as HTMLInputElement).checked ? true : null });
-const clearAllFilters = () => setVisualFilters({ status: null, bank: null, hasDebt: null, enInspeccion: null, legal: null, titulo: null, descargadaDGII: null, saldo: null });
+const handleEditorFilterApply = (result: FilterResult) => {
+  const filteredUnitIds = result.filteredItems
+    .map((item) => Number((item as { id?: unknown }).id))
+    .filter((id) => Number.isFinite(id));
+
+  setVisualFilters({
+    detailedUnitIds: result.activeFilters.length > 0 ? filteredUnitIds : null
+  });
+};
+const handleEditorFilterClear = () => setVisualFilters({ detailedUnitIds: null });
 const clampDimension = (value: number, min: number, max: number) => Math.max(min, Math.min(max, Number(value) || min));
+const updateBlueprintTransformValue = (key: keyof BlueprintTransform, event: Event) => {
+  const rawValue = Number((event.target as HTMLInputElement).value);
+  if (!Number.isFinite(rawValue)) return;
+
+  const normalizedValue = key === 'width' || key === 'depth'
+    ? Math.max(1, rawValue)
+    : key === 'opacity'
+      ? Math.max(0.15, Math.min(1, rawValue))
+      : key === 'rotationY'
+        ? ((rawValue % 360) + 360) % 360
+        : rawValue;
+
+  setBlueprintTransform({
+    ...blueprintTransform.value,
+    [key]: Number(normalizedValue.toFixed(2))
+  });
+};
+const autoFitBlueprint = () => emit('blueprint-auto-fit');
+const resetBlueprintTransform = () => setBlueprintTransform(null);
 const applyGlobalDimensions = () => {
   const width = clampDimension(globalWidth.value, 1, 50);
   const depth = clampDimension(globalDepth.value, 1, 50);
@@ -474,6 +535,33 @@ const onFileChange = (event: Event) => {
 .btn-glass-filter { background: rgba(255,255,255,0.5); border: 1px solid rgba(0,0,0,0.08); padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 700; color: #64748b; display: flex; align-items: center; gap: 8px; cursor: pointer; transition: all 0.2s; position: relative; }
 .btn-glass-filter:hover, .btn-glass-filter.active { background: white; color: #3b82f6; border-color: #3b82f6; box-shadow: 0 4px 12px rgba(59,130,246,0.1); }
 .filter-count { background: #3b82f6; color: white; font-size: 10px; width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; position: absolute; top: -6px; right: -6px; }
+.toolbar-editor-filter {
+  flex-shrink: 0;
+}
+.toolbar-editor-filter :deep(.filter-trigger) {
+  min-height: 36px;
+  background: rgba(255,255,255,0.5);
+  border: 1px solid rgba(0,0,0,0.08);
+  padding: 8px 16px;
+  border-radius: 12px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: none;
+}
+.toolbar-editor-filter :deep(.filter-trigger:hover),
+.toolbar-editor-filter :deep(.filter-trigger.active) {
+  background: white;
+  color: #3b82f6;
+  border-color: #3b82f6;
+  box-shadow: 0 4px 12px rgba(59,130,246,0.1);
+}
+.mobile-editor-filter {
+  width: 100%;
+}
+.mobile-editor-filter :deep(.filter-trigger) {
+  justify-content: space-between;
+}
 .filters-panel { position: absolute; top: calc(100% + 12px); right: -50%; width: 250px; max-height: 450px; overflow-y: auto; background: rgba(255,255,255,0.95); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.4); z-index: 1200; }
 .filter-label { font-size: 11px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; display: block; }
 .btn-close-sm { border: none; background: transparent; color: #94a3b8; cursor: pointer; padding: 4px; }
@@ -484,6 +572,18 @@ const onFileChange = (event: Event) => {
   top: calc(100% + 12px);
   right: -30%;
   width: 310px;
+  background: rgba(255,255,255,0.96);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.4);
+  z-index: 1200;
+}
+
+.blueprint-controls-panel {
+  position: absolute;
+  top: calc(100% + 12px);
+  right: -35%;
+  width: 340px;
   background: rgba(255,255,255,0.96);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
@@ -511,14 +611,22 @@ const onFileChange = (event: Event) => {
   gap: 8px;
 }
 
-.global-dimensions-grid label {
+.blueprint-controls-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.global-dimensions-grid label,
+.blueprint-controls-grid label {
   display: flex;
   flex-direction: column;
   gap: 5px;
   min-width: 0;
 }
 
-.global-dimensions-grid span {
+.global-dimensions-grid span,
+.blueprint-controls-grid span {
   color: #64748b;
   font-size: 10px;
   font-weight: 800;
@@ -526,7 +634,8 @@ const onFileChange = (event: Event) => {
   text-transform: uppercase;
 }
 
-.global-dimensions-grid input {
+.global-dimensions-grid input,
+.blueprint-controls-grid input {
   width: 100%;
   min-width: 0;
   border: 1px solid rgba(15,23,42,0.08);
@@ -539,10 +648,28 @@ const onFileChange = (event: Event) => {
   padding: 8px 9px;
 }
 
-.global-dimensions-grid input:focus {
+.global-dimensions-grid input:focus,
+.blueprint-controls-grid input:focus {
   background: #ffffff;
   border-color: #3b82f6;
   box-shadow: 0 0 0 3px rgba(59,130,246,0.1);
+}
+
+.blueprint-slider-row {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 10px;
+}
+
+.blueprint-range {
+  width: 100%;
+}
+
+.blueprint-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  gap: 8px;
 }
 
 .btn-glass-primary, .btn-glass-save, .btn-glass-outline { border: none; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; cursor: pointer; transition: all 0.2s; }
@@ -657,7 +784,8 @@ const onFileChange = (event: Event) => {
   .toolbar-row { min-height: 56px; }
   .mobile-panel { display: flex; flex-direction: column; gap: 14px; padding: 0 0 14px; }
   .filters-panel,
-  .global-dimensions-panel {
+  .global-dimensions-panel,
+  .blueprint-controls-panel {
     position: static;
     width: 100%;
     right: auto;
@@ -665,7 +793,27 @@ const onFileChange = (event: Event) => {
     max-height: none;
     margin-top: 12px;
   }
+  .mobile-editor-filter :deep(.filter-popover) {
+    position: static;
+    width: 100%;
+    max-height: min(640px, 70vh);
+    margin-top: 12px;
+  }
   .mode-status-badge { display: inline-flex; }
+}
+
+@media (max-width: 520px) {
+  .blueprint-controls-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .blueprint-slider-row {
+    grid-template-columns: 1fr 52px;
+  }
+
+  .blueprint-slider-row .control-label {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 768px) {
