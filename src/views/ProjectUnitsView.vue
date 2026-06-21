@@ -41,21 +41,25 @@
           <div class="row g-3 align-items-end">
             <div class="col-md-3">
               <label class="form-label smaller-text fw-bold text-slate-400 text-uppercase ls-1">Búsqueda</label>
-              <div class="search-wrapper position-relative">
-                <i class="bi bi-search position-absolute top-50 start-0 translate-middle-y ms-3 text-slate-400"></i>
+              <div class="input-group">
+                <span class="input-group-text">
+                  <i class="bi bi-search"></i>
+                </span>
                 <input 
                   v-model="filters.search" 
                   type="text" 
-                  class="form-control ps-5 border-0 bg-slate-100 shadow-none py-2" 
+                  class="form-control" 
                   placeholder="Unidad, edificio, nombre..."
                 >
               </div>
             </div>
             <div class="col-md-2">
               <label class="form-label smaller-text fw-bold text-slate-400 text-uppercase ls-1">Edificio</label>
-              <div class="position-relative">
-                <i class="bi bi-building position-absolute top-50 start-0 translate-middle-y ms-3 text-slate-400"></i>
-                <select v-model="filters.edificio" class="form-select ps-5 border-0 bg-slate-100 shadow-none py-2">
+              <div class="input-group">
+                <span class="input-group-text">
+                  <i class="bi bi-building"></i>
+                </span>
+                <select v-model="filters.edificio" class="form-select">
                   <option value="">Todos</option>
                   <option v-for="b in availableBuildings" :key="b" :value="b">{{ b }}</option>
                 </select>
@@ -63,9 +67,11 @@
             </div>
             <div class="col-md-2">
               <label class="form-label smaller-text fw-bold text-slate-400 text-uppercase ls-1">Estado</label>
-              <div class="position-relative">
-                <i class="bi bi-tag position-absolute top-50 start-0 translate-middle-y ms-3 text-slate-400"></i>
-                <select v-model="filters.estado" class="form-select ps-5 border-0 bg-slate-100 shadow-none py-2">
+              <div class="input-group">
+                <span class="input-group-text">
+                  <i class="bi bi-tag"></i>
+                </span>
+                <select v-model="filters.estado" class="form-select">
                   <option value="">Todos</option>
                   <option value="Entregada">Entregada</option>
                   <option value="Financiamiento">Financiamiento</option>
@@ -78,9 +84,11 @@
             </div>
             <div class="col-md-2">
               <label class="form-label smaller-text fw-bold text-slate-400 text-uppercase ls-1">Banco</label>
-              <div class="position-relative">
-                <i class="bi bi-bank position-absolute top-50 start-0 translate-middle-y ms-3 text-slate-400"></i>
-                <select v-model="filters.banco" class="form-select ps-5 border-0 bg-slate-100 shadow-none py-2">
+              <div class="input-group">
+                <span class="input-group-text">
+                  <i class="bi bi-bank"></i>
+                </span>
+                <select v-model="filters.banco" class="form-select">
                    <option value="">Todos</option>
                    <option v-for="b in banks" :key="b" :value="b">{{ b || 'Sin Banco' }}</option>
                 </select>
@@ -96,7 +104,7 @@
                  </div>
                </div>
                <button 
-                 class="btn btn-outline-slate btn-sm px-3 py-2 rounded-3 d-flex align-items-center gap-2" 
+                 class="btn btn-outline-secondary d-flex align-items-center gap-2" 
                  @click="resetFilters"
                  title="Limpiar Filtros"
                >
@@ -181,7 +189,7 @@
                   </div>
                 </td>
                 <td class="text-end pe-4">
-                   <button class="btn btn-icon text-blue-600" @click="viewDetails(unit)" title="Ver Detalles">
+                   <button class="btn btn-primary btn-icon shadow-sm" @click="viewDetails(unit)" title="Ver Detalles">
                       <i class="bi bi-eye"></i>
                    </button>
                 </td>
@@ -258,7 +266,7 @@
                 <div class="d-flex flex-column gap-3">
                   <div class="detail-row">
                     <span class="label">Estado</span>
-                    <span class="badge fw-bold" :class="statusClass(selectedUnit?.estado || '')">{{ selectedUnit?.estado }}</span>
+                    <span class="badge fw-bold" :class="statusClass(selectedUnit?.estado || '')">{{ selectedUnit?.estado || 'Sin estado' }}</span>
                   </div>
                   <div class="detail-row">
                     <span class="label">Cliente</span>
@@ -270,7 +278,7 @@
                   </div>
                   <div class="detail-row">
                     <span class="label">Metraje</span>
-                    <span class="value">{{ selectedUnit?.metraje }} m²</span>
+                    <span class="value">{{ selectedUnit?.metraje || 0 }} m²</span>
                   </div>
                   <div class="detail-row">
                     <span class="label">Contacto</span>
@@ -288,16 +296,20 @@
                 <div class="financial-card rounded-3 p-3 mb-3 bg-slate-50 border">
                   <div class="d-flex justify-content-between mb-2">
                     <span class="smaller-text text-slate-500">Precio Venta</span>
-                    <span class="fw-bold text-slate-900">{{ formatCurrency(selectedUnit?.precio || 0) }}</span>
+                    <span class="fw-bold text-slate-900">{{ formatCurrencyValue(selectedUnit?.precio) }}</span>
                   </div>
                   <div class="d-flex justify-content-between mb-1">
-                    <span class="smaller-text text-slate-500">Inicial Pagado</span>
-                    <span class="fw-bold text-emerald-600">{{ formatCurrency(selectedUnit?.pagado || 0) }}</span>
+                    <span class="smaller-text text-slate-500">Inicial</span>
+                    <span class="fw-bold text-slate-900">{{ formatCurrencyValue(selectedUnit?.inicial) }}</span>
+                  </div>
+                  <div class="d-flex justify-content-between mb-1">
+                    <span class="smaller-text text-slate-500">Total Pagado</span>
+                    <span class="fw-bold text-emerald-600">{{ formatCurrencyValue(selectedUnit?.pagado) }}</span>
                   </div>
                   <div class="d-flex justify-content-between pt-2 border-top mt-2">
                     <span class="smaller-text fw-bold text-slate-700">Balance Adeudado</span>
-                    <span class="fw-800 fs-5" :class="selectedUnit?.adeudado && selectedUnit.adeudado > 0 ? 'text-red-500' : 'text-emerald-600'">
-                      {{ formatCurrency(selectedUnit?.adeudado || 0) }}
+                    <span class="fw-800 fs-5" :class="accountTextClass(selectedUnit)">
+                      {{ formatCurrencyValue(selectedUnit?.adeudado) }}
                     </span>
                   </div>
                 </div>
@@ -312,7 +324,7 @@
                     </div>
                     <div class="detail-row" v-if="selectedUnit?.fechaFormaPago">
                       <span class="label">Fecha Trámite</span>
-                      <span class="value text-primary fw-bold">{{ selectedUnit?.fechaFormaPago }}</span>
+                      <span class="value text-primary fw-bold">{{ formatDateValue(selectedUnit?.fechaFormaPago) }}</span>
                     </div>
                 </div>
               </div>
@@ -321,25 +333,25 @@
               <div class="col-12 border-top pt-4">
                 <h6 class="fw-bold text-slate-900 mb-3"><i class="bi bi-tools me-2"></i>Hitos y Construcción</h6>
                 <div class="d-flex flex-wrap gap-2">
-                  <div class="p-2 rounded-3 border flex-grow-1 d-flex align-items-center gap-2" :class="selectedUnit?.iniciadoVaciados ? 'bg-success-soft border-success' : 'bg-slate-50'">
-                    <i class="bi" :class="selectedUnit?.iniciadoVaciados ? 'bi-hammer text-success' : 'bi-dash-circle text-slate-400'"></i>
+                  <div class="p-2 rounded-3 border flex-grow-1 d-flex align-items-center gap-2" :class="booleanCardClass(selectedUnit?.iniciadoVaciados, 'bg-success-soft border-success')">
+                    <i class="bi" :class="booleanIconClass(selectedUnit?.iniciadoVaciados, 'bi-hammer text-success')"></i>
                     <div class="smaller-text">
                       <div class="fw-bold">Vaciados</div>
-                      <div class="opacity-75">{{ selectedUnit?.iniciadoVaciados ? 'Iniciado' : 'Pendiente' }}</div>
+                      <div class="opacity-75">{{ booleanStatusLabel(selectedUnit?.iniciadoVaciados, 'Iniciado', 'Pendiente') }}</div>
                     </div>
                   </div>
-                  <div class="p-2 rounded-3 border flex-grow-1 d-flex align-items-center gap-2" :class="selectedUnit?.enInspeccion ? 'bg-amber-50 border-warning' : 'bg-slate-50'">
-                    <i class="bi" :class="selectedUnit?.enInspeccion ? 'bi-clipboard-check text-warning' : 'bi-dash-circle text-slate-400'"></i>
+                  <div class="p-2 rounded-3 border flex-grow-1 d-flex align-items-center gap-2" :class="booleanCardClass(selectedUnit?.enInspeccion, 'bg-amber-50 border-warning')">
+                    <i class="bi" :class="booleanIconClass(selectedUnit?.enInspeccion, 'bi-clipboard-check text-warning')"></i>
                     <div class="smaller-text">
                       <div class="fw-bold">Inspección</div>
-                      <div class="opacity-75">{{ selectedUnit?.enInspeccion ? 'En Curso' : 'Esperando' }}</div>
+                      <div class="opacity-75">{{ booleanStatusLabel(selectedUnit?.enInspeccion, 'En curso', 'Esperando') }}</div>
                     </div>
                   </div>
-                  <div class="p-2 rounded-3 border flex-grow-1 d-flex align-items-center gap-2" :class="selectedUnit?.adeudado === 0 ? 'bg-success-soft border-success' : 'bg-red-50 border-danger'">
-                    <i class="bi" :class="selectedUnit?.adeudado === 0 ? 'bi-cash-coin text-success' : 'bi-cash-stack text-danger'"></i>
+                  <div class="p-2 rounded-3 border flex-grow-1 d-flex align-items-center gap-2" :class="accountCardClass(selectedUnit)">
+                    <i class="bi" :class="accountIconClass(selectedUnit)"></i>
                     <div class="smaller-text">
                       <div class="fw-bold">Cuentas</div>
-                      <div class="opacity-75">{{ selectedUnit?.adeudado === 0 ? 'Saldado' : 'Con Balance' }}</div>
+                      <div class="opacity-75">{{ accountStatusLabel(selectedUnit) }}</div>
                     </div>
                   </div>
                 </div>
@@ -352,49 +364,49 @@
                   <div class="col-6 col-md-3">
                     <div class="date-item">
                       <div class="date-label">Completa Inicial</div>
-                      <div class="date-value">{{ selectedUnit?.fechaCompletaInicial || '---' }}</div>
+                      <div class="date-value">{{ formatDateValue(selectedUnit?.fechaCompletaInicial) }}</div>
                     </div>
                   </div>
                   <div class="col-6 col-md-3">
                     <div class="date-item">
                       <div class="date-label">Inicio Vaciados</div>
-                      <div class="date-value">{{ selectedUnit?.fechaInicioVaciados || '---' }}</div>
+                      <div class="date-value">{{ formatDateValue(selectedUnit?.fechaInicioVaciados) }}</div>
                     </div>
                   </div>
                   <div class="col-6 col-md-3">
                     <div class="date-item">
                       <div class="date-label">Legal</div>
-                      <div class="date-value">{{ selectedUnit?.fechaLegal || '---' }}</div>
+                      <div class="date-value">{{ formatDateValue(selectedUnit?.fechaLegal) }}</div>
                     </div>
                   </div>
                   <div class="col-6 col-md-3">
                     <div class="date-item">
                       <div class="date-label">Entrega Inspección</div>
-                      <div class="date-value fw-bold text-blue-600">{{ selectedUnit?.fechaEntregaInspeccion || '---' }}</div>
+                      <div class="date-value fw-bold text-blue-600">{{ formatDateValue(selectedUnit?.fechaEntregaInspeccion) }}</div>
                     </div>
                   </div>
                   <div class="col-6 col-md-3">
                     <div class="date-item">
                       <div class="date-label">Inspección 1</div>
-                      <div class="date-value">{{ selectedUnit?.fechaInspeccion1 || '---' }}</div>
+                      <div class="date-value">{{ formatDateValue(selectedUnit?.fechaInspeccion1) }}</div>
                     </div>
                   </div>
                   <div class="col-6 col-md-3">
                     <div class="date-item">
                       <div class="date-label">Inspección 2</div>
-                      <div class="date-value">{{ selectedUnit?.fechaInspeccion2 || '---' }}</div>
+                      <div class="date-value">{{ formatDateValue(selectedUnit?.fechaInspeccion2) }}</div>
                     </div>
                   </div>
                   <div class="col-6 col-md-3">
                     <div class="date-item">
                       <div class="date-label">Bono Gobierno</div>
-                      <div class="date-value">{{ selectedUnit?.fechaGobierno || '---' }}</div>
+                      <div class="date-value">{{ formatDateValue(selectedUnit?.fechaGobierno) }}</div>
                     </div>
                   </div>
                   <div class="col-6 col-md-3">
                     <div class="date-item">
                       <div class="date-label">Trámite Título</div>
-                      <div class="date-value">{{ selectedUnit?.fechaMicelaneos || '---' }}</div>
+                      <div class="date-value">{{ formatDateValue(selectedUnit?.fechaMicelaneos) }}</div>
                     </div>
                   </div>
                 </div>
@@ -405,38 +417,38 @@
                 <h6 class="fw-bold text-slate-900 border-bottom pb-2 mb-3">Procesos y Seguimientos</h6>
                 <div class="row g-3">
                   <div class="col-md-3">
-                    <div class="process-stat-card" :class="{ active: selectedUnit?.legal }">
+                    <div class="process-stat-card" :class="processIndicatorClass(selectedUnit?.legal)">
                       <div class="icon">L</div>
                       <div class="info">
                         <div class="title">Proceso Legal</div>
-                        <div class="status">{{ selectedUnit?.legal ? 'Completado' : 'Pendiente' }}</div>
+                        <div class="status">{{ booleanStatusLabel(selectedUnit?.legal, 'Completado', 'Pendiente') }}</div>
                       </div>
                     </div>
                   </div>
                   <div class="col-md-3">
-                    <div class="process-stat-card" :class="{ active: selectedUnit?.gobierno }">
+                    <div class="process-stat-card" :class="processIndicatorClass(selectedUnit?.gobierno)">
                       <div class="icon">G</div>
                       <div class="info">
                         <div class="title">Bono Gobierno</div>
-                        <div class="status">{{ selectedUnit?.gobierno ? 'Aplicado' : 'Sin procesar' }}</div>
+                        <div class="status">{{ booleanStatusLabel(selectedUnit?.gobierno, 'Aplicado', 'Sin procesar') }}</div>
                       </div>
                     </div>
                   </div>
                   <div class="col-md-3">
-                    <div class="process-stat-card" :class="{ active: selectedUnit?.micelaneos }">
+                    <div class="process-stat-card" :class="processIndicatorClass(selectedUnit?.micelaneos)">
                       <div class="icon">M</div>
                       <div class="info">
                         <div class="title">Micelaneos</div>
-                        <div class="status">{{ selectedUnit?.micelaneos ? 'Pagados' : 'Pendiente' }}</div>
+                        <div class="status">{{ booleanStatusLabel(selectedUnit?.micelaneos, 'Pagados', 'Pendiente') }}</div>
                       </div>
                     </div>
                   </div>
                   <div class="col-md-3">
-                    <div class="process-stat-card" :class="{ active: selectedUnit?.titulo }">
+                    <div class="process-stat-card" :class="processIndicatorClass(selectedUnit?.titulo)">
                       <div class="icon">T</div>
                       <div class="info">
                         <div class="title">Título Prop.</div>
-                        <div class="status">{{ selectedUnit?.titulo ? 'Emitido' : 'En trámite' }}</div>
+                        <div class="status">{{ booleanStatusLabel(selectedUnit?.titulo, 'Emitido', 'En trámite') }}</div>
                       </div>
                     </div>
                   </div>
@@ -639,6 +651,93 @@ const formatCurrency = (val: number) => {
   return new Intl.NumberFormat('es-DO', { style: 'currency', currency: 'DOP' }).format(val);
 };
 
+const formatCurrencyValue = (val: number | null | undefined) => {
+  return typeof val === 'number' ? formatCurrency(val) : 'N/A';
+};
+
+const formatDateValue = (val: string | null | undefined) => {
+  const dateValue = String(val ?? '').trim();
+  return dateValue || '---';
+};
+
+const booleanStatusLabel = (
+  value: boolean | null | undefined,
+  trueLabel: string,
+  falseLabel: string,
+  unknownLabel = 'Sin dato'
+) => {
+  if (value === true) return trueLabel;
+  if (value === false) return falseLabel;
+  return unknownLabel;
+};
+
+const booleanCardClass = (
+  value: boolean | null | undefined,
+  trueClass: string,
+  falseClass = 'bg-slate-50',
+  unknownClass = 'bg-slate-50 text-slate-500 border-slate-200'
+) => {
+  if (value === true) return trueClass;
+  if (value === false) return falseClass;
+  return unknownClass;
+};
+
+const booleanIconClass = (
+  value: boolean | null | undefined,
+  trueClass: string,
+  falseClass = 'bi-dash-circle text-slate-400',
+  unknownClass = 'bi-question-circle text-slate-400'
+) => {
+  if (value === true) return trueClass;
+  if (value === false) return falseClass;
+  return unknownClass;
+};
+
+const isAccountPaid = (unit: DetailedUnit | null) => {
+  if (!unit) return false;
+  return unit.saldo === true || (typeof unit.adeudado === 'number' && unit.adeudado <= 0);
+};
+
+const hasAccountBalance = (unit: DetailedUnit | null) => {
+  return typeof unit?.adeudado === 'number' && unit.adeudado > 0;
+};
+
+const hasAccountData = (unit: DetailedUnit | null) => {
+  return unit?.saldo !== null && unit?.saldo !== undefined || typeof unit?.adeudado === 'number';
+};
+
+const accountStatusLabel = (unit: DetailedUnit | null) => {
+  if (!hasAccountData(unit)) return 'Sin dato';
+  if (isAccountPaid(unit)) return 'Saldado';
+  if (hasAccountBalance(unit)) return 'Con balance';
+  return 'No saldado';
+};
+
+const accountCardClass = (unit: DetailedUnit | null) => {
+  if (!hasAccountData(unit)) return 'bg-slate-50 text-slate-500 border-slate-200';
+  if (isAccountPaid(unit)) return 'bg-success-soft border-success';
+  if (hasAccountBalance(unit)) return 'bg-red-50 border-danger';
+  return 'bg-slate-50';
+};
+
+const accountIconClass = (unit: DetailedUnit | null) => {
+  if (!hasAccountData(unit)) return 'bi-question-circle text-slate-400';
+  if (isAccountPaid(unit)) return 'bi-cash-coin text-success';
+  if (hasAccountBalance(unit)) return 'bi-cash-stack text-danger';
+  return 'bi-dash-circle text-slate-400';
+};
+
+const accountTextClass = (unit: DetailedUnit | null) => {
+  if (!hasAccountData(unit)) return 'text-slate-500';
+  return hasAccountBalance(unit) ? 'text-red-500' : 'text-emerald-600';
+};
+
+const processIndicatorClass = (value: boolean | null | undefined) => ({
+  active: value === true,
+  pending: value === false,
+  unknown: value === null || value === undefined
+});
+
 const statusClass = (status: string) => {
   switch(status) {
     case 'Entregada': return 'status-badge-delivered';
@@ -726,6 +825,26 @@ watch(() => route.params.id, (newId) => {
   background-color: white !important;
   box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1) !important;
   border: 1px solid #3b82f6 !important;
+}
+
+.filter-glass .form-control,
+.filter-glass .form-select {
+  padding: 0.375rem 0.75rem;
+  border: var(--bs-border-width) solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.filter-glass .input-group-text {
+  border: var(--bs-border-width) solid var(--bs-border-color);
+  border-right: 0;
+}
+
+.filter-glass .form-control:focus,
+.filter-glass .form-select:focus {
+  border-color: var(--bs-primary-border-subtle, var(--bs-primary)) !important;
+  box-shadow: 0 0 0 0.25rem rgba(var(--bs-primary-rgb), 0.25) !important;
 }
 
 .btn-outline-slate {
@@ -821,7 +940,7 @@ watch(() => route.params.id, (newId) => {
   border: 1px solid transparent;
 }
 
-.btn-icon:hover {
+.btn-icon:not(.btn-primary):hover {
   background: #f1f5f9;
   border-color: #e2e8f0;
 }
@@ -933,6 +1052,16 @@ watch(() => route.params.id, (newId) => {
   background: #f8faff;
 }
 
+.process-stat-card.pending {
+  opacity: 0.85;
+}
+
+.process-stat-card.unknown {
+  opacity: 0.65;
+  border-style: dashed;
+  background: #f8fafc;
+}
+
 .process-stat-card .icon {
   width: 32px;
   height: 32px;
@@ -949,6 +1078,11 @@ watch(() => route.params.id, (newId) => {
 .process-stat-card.active .icon {
   background: #3b82f6;
   color: white;
+}
+
+.process-stat-card.unknown .icon {
+  background: #e2e8f0;
+  color: #64748b;
 }
 
 .process-stat-card .title {
@@ -983,6 +1117,7 @@ watch(() => route.params.id, (newId) => {
 .bg-emerald-soft { background-color: #ecfdf5 !important; }
 .bg-red-50 { background-color: #fef2f2 !important; }
 .bg-amber-50 { background-color: #fffbeb !important; }
+.border-slate-200 { border-color: #e2e8f0 !important; }
 .text-purple-600 { color: #7c3aed !important; }
 .text-emerald-600 { color: #059669 !important; }
 .border-purple { border-color: #ddd6fe !important; }

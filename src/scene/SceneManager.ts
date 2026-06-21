@@ -29,6 +29,12 @@ type UnitMaterialState = {
     transparent: boolean;
 };
 
+export type CameraViewState = {
+    position: { x: number; y: number; z: number };
+    target: { x: number; y: number; z: number };
+    zoom: number;
+};
+
 export class SceneManager {
     public scene: THREE.Scene;
     public camera: THREE.PerspectiveCamera;
@@ -48,6 +54,7 @@ export class SceneManager {
     private readonly onResizeHandler: () => void;
     private readonly minCameraY = 0.25;
     private readonly blueprintBoundsPadding = 1.12;
+    private hasAutoFramedLayout = false;
     private resizeObserver: ResizeObserver | null = null;
     private blueprintLoadVersion = 0;
     private readonly unitGeometry = new THREE.BoxGeometry(1, 1, 1);
@@ -245,6 +252,34 @@ export class SceneManager {
         return this.calculateAutoBlueprintTransform();
     }
 
+    public getCameraViewState(): CameraViewState {
+        return {
+            position: {
+                x: this.camera.position.x,
+                y: this.camera.position.y,
+                z: this.camera.position.z
+            },
+            target: {
+                x: this.controls.target.x,
+                y: this.controls.target.y,
+                z: this.controls.target.z
+            },
+            zoom: this.camera.zoom
+        };
+    }
+
+    public setCameraViewState(state: CameraViewState | null) {
+        if (!state) return;
+
+        this.camera.position.set(state.position.x, state.position.y, state.position.z);
+        this.controls.target.set(state.target.x, state.target.y, state.target.z);
+        this.camera.zoom = Number.isFinite(state.zoom) && state.zoom > 0 ? state.zoom : 1;
+        this.camera.updateProjectionMatrix();
+        this.camera.lookAt(this.controls.target);
+        this.controls.update();
+        this.hasAutoFramedLayout = true;
+    }
+
     private disposeObjectResources(object: THREE.Object3D) {
         const mesh = object as THREE.Mesh;
         if (mesh.geometry && mesh.geometry !== this.unitGeometry && mesh.geometry !== this.unitEdgesGeometry) {
@@ -281,7 +316,6 @@ export class SceneManager {
         if (!visualFilters) return true;
         if (
             Array.isArray(visualFilters.detailedUnitIds)
-            && visualFilters.detailedUnitIds.length > 0
             && (unit.detailedUnitId === null || !visualFilters.detailedUnitIds.includes(unit.detailedUnitId))
         ) return false;
         if (visualFilters.status && unit.status !== visualFilters.status) return false;
@@ -355,6 +389,7 @@ export class SceneManager {
 
     public syncBuildings(buildings: Building[], visualFilters: UnitVisualFilters | null = null, selectedUnitId: string | null = null) {
         this.updateBlueprintLayoutBounds(buildings);
+        this.autoFrameLayout(buildings);
 
         let buildingsGroup = this.scene.getObjectByName('buildingsGroup') as THREE.Group;
         if (!buildingsGroup) {
@@ -569,6 +604,37 @@ export class SceneManager {
         this.updateBlueprintTransform();
     }
 
+    private autoFrameLayout(buildings: Building[]) {
+        if (this.hasAutoFramedLayout) return;
+
+        if (!Array.isArray(buildings) || buildings.length === 0 || !this.blueprintLayoutBounds) {
+            this.hasAutoFramedLayout = false;
+            return;
+        }
+
+        const maxBuildingHeight = Math.max(
+            1,
+            ...buildings.map((building) => Math.max(1, Number(building.dimensions?.height) || 1))
+        );
+        const layoutSize = Math.max(this.blueprintLayoutBounds.width, this.blueprintLayoutBounds.depth, maxBuildingHeight * 1.4, 12);
+        const distance = layoutSize * 0.65;
+        const target = new THREE.Vector3(
+            this.blueprintLayoutBounds.centerX,
+            maxBuildingHeight * 0.28,
+            this.blueprintLayoutBounds.centerZ
+        );
+
+        this.controls.target.copy(target);
+        this.camera.position.set(
+            target.x,
+            Math.max(maxBuildingHeight * 1.35, distance * 1.05),
+            target.z + Math.max(layoutSize * 0.02, 0.1)
+        );
+        this.camera.lookAt(target);
+        this.controls.update();
+        this.hasAutoFramedLayout = true;
+    }
+
     private updateBlueprintLayoutBounds(buildings: any[]) {
         if (!Array.isArray(buildings) || buildings.length === 0) {
             this.blueprintLayoutBounds = null;
@@ -634,6 +700,7 @@ export class SceneManager {
     private pendingDragGroup: THREE.Group | null = null;
     private dragThresholdPx = 4;
     private dragSnapStep = 0.1;
+    private lastDragPosition: { id: string; x: number; z: number } | null = null;
 
     private setupRaycaster() {
         const raycaster = new THREE.Raycaster();
@@ -745,19 +812,30 @@ export class SceneManager {
                     this.isDragging = true;
 
                     const id = this.draggedGroup.userData?.id || this.draggedGroup.children.find(c => c.userData.isBuildingPick)?.userData.id;
-                    if (id && this.onBuildingMoved) {
-                        this.onBuildingMoved(id, snappedX, snappedZ);
+                    if (id) {
+                        this.lastDragPosition = { id, x: snappedX, z: snappedZ };
                     }
                 }
             }
         });
 
-        this.renderer.domElement.addEventListener('pointerup', () => {
+        const finishDrag = () => {
+            if (this.lastDragPosition && this.onBuildingMoved) {
+                this.onBuildingMoved(this.lastDragPosition.id, this.lastDragPosition.x, this.lastDragPosition.z);
+            }
+
             this.draggedGroup = null;
             this.pendingDragGroup = null;
             this.pointerDownPos = null;
+            this.lastDragPosition = null;
             this.controls.enabled = true;
             setTimeout(() => { this.isDragging = false; }, 50);
+        };
+
+        this.renderer.domElement.addEventListener('pointerup', finishDrag);
+        this.renderer.domElement.addEventListener('pointercancel', finishDrag);
+        this.renderer.domElement.addEventListener('pointerleave', () => {
+            if (this.isDragging) finishDrag();
         });
 
         this.updateBlueprintTransform();

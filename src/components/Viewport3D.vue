@@ -61,6 +61,7 @@ const showColorGuide = ref(false);
 const isApplyingLayout = ref(false);
 const layoutPreview = ref<LayoutPreview | null>(null);
 let sceneManager: SceneManager | null = null;
+let restoredCameraProjectId: string | null = null;
 const appMode = computed(() => appStore.appMode);
 const selectedUnitId = computed(() => appStore.selectedUnitId);
 const effectiveVisualFilters = computed(() => ({
@@ -77,6 +78,23 @@ let pendingLayoutSyncId: number | null = null;
 const syncSceneLayout = () => {
   if (!sceneManager) return;
   sceneManager.syncBuildings(projectBuildings.value, effectiveVisualFilters.value, selectedUnitId.value);
+  restoreProjectCameraState();
+};
+
+const restoreProjectCameraState = () => {
+  if (!sceneManager || !appStore.currentProjectId) return;
+  if (restoredCameraProjectId === appStore.currentProjectId) return;
+
+  const cameraState = appStore.cameraStateByProject[appStore.currentProjectId];
+  if (!cameraState) return;
+
+  sceneManager.setCameraViewState(cameraState);
+  restoredCameraProjectId = appStore.currentProjectId;
+};
+
+const saveProjectCameraState = () => {
+  if (!sceneManager || !appStore.currentProjectId) return;
+  appStore.cameraStateByProject[appStore.currentProjectId] = sceneManager.getCameraViewState();
 };
 
 const scheduleSceneLayoutSync = () => {
@@ -127,6 +145,7 @@ onMounted(() => {
 
     syncSceneLayout();
     applyCurrentBlueprint(currentProject.value?.imagenPlano);
+    restoreProjectCameraState();
   }
 });
 
@@ -245,6 +264,7 @@ const handleSaveLayout = async () => {
 };
 
 onUnmounted(() => {
+  saveProjectCameraState();
   if (pendingLayoutSyncId !== null) {
     window.cancelAnimationFrame(pendingLayoutSyncId);
     pendingLayoutSyncId = null;

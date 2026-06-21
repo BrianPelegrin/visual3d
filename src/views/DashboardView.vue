@@ -1,8 +1,8 @@
 <template>
   <div class="dashboard-view p-4 min-vh-100">
     <div class="container-fluid">
-      <div class="row mb-4 align-items-end">
-        <div class="col-md-8">
+      <div class="row mb-4">
+        <div class="col-12">
           <h1 class="display-6 fw-bold text-slate-900 mb-1">
             {{ project ? project.nombre : 'Vista General del Proyecto' }}
           </h1>
@@ -13,30 +13,44 @@
             </span>
           </p>
         </div>
-        <div class="col-md-4 d-flex flex-wrap justify-content-md-end gap-2 mt-3 mt-md-0">
-          <ExcelLikeFilter
-            :items="projectApartments"
-            :visible-fields="dashboardFilterFields"
-            :field-labels="dashboardFilterLabels"
-            :field-types="dashboardFilterTypes"
-            @apply="handleDashboardFilterApply"
-            @clear="handleDashboardFilterClear"
-          />
-          <button class="btn btn-white shadow-sm border-0 px-4 py-2 fw-bold" :disabled="exportableUnits.length === 0" @click="exportDashboardUnitsToExcel">
-            <i class="bi bi-file-earmark-excel me-2"></i>Exportar Excel
-          </button>
-          <router-link v-if="!isSalesRole" :to="`/editor/${projectId}`" class="btn btn-white shadow-sm border-0 px-4 py-2 fw-bold">
-            <i class="bi bi-box-seam me-2"></i>Visualizador 3D
-          </router-link>
-          <router-link v-if="!isSalesRole" :to="`/projects/${projectId}/units`" class="btn btn-primary-custom shadow-sm border-0 px-4 py-2 fw-bold">
-            <i class="bi bi-file-earmark-text me-2"></i>Ver Unidades
-          </router-link>
+        <div class="col-12 mt-3">
+          <div class="dashboard-actions-toolbar">
+            <ExcelLikeFilter
+              class="dashboard-filter-action"
+              trigger-class="btn btn-light shadow-sm fw-bold dashboard-action-btn d-inline-flex align-items-center justify-content-center gap-2"
+              :items="projectApartments"
+              :visible-fields="dashboardFilterFields"
+              :field-labels="dashboardFilterLabels"
+              :field-types="dashboardFilterTypes"
+              :state="dashboardFilterPopupState"
+              :storage-key="`dashboard-filter-popup-${projectId}`"
+              @apply="handleDashboardFilterApply"
+              @clear="handleDashboardFilterClear"
+              @state-change="handleDashboardFilterStateChange"
+            />
+            <router-link v-if="!isSalesRole" :to="`/editor/${projectId}`" class="btn btn-primary shadow-sm fw-bold dashboard-action-btn d-inline-flex align-items-center justify-content-center gap-2">
+              <i class="bi bi-box-seam"></i>
+              <span>Visualizador 3D</span>
+            </router-link>
+            <router-link v-if="!isSalesRole" :to="`/projects/${projectId}/units`" class="btn btn-outline-primary shadow-sm fw-bold dashboard-action-btn d-inline-flex align-items-center justify-content-center gap-2">
+              <i class="bi bi-file-earmark-text"></i>
+              <span>Ver Unidades</span>
+            </router-link>
+            <button class="btn btn-outline-success shadow-sm fw-bold dashboard-action-btn d-inline-flex align-items-center justify-content-center gap-2" :disabled="exportableUnits.length === 0" @click="exportDashboardUnitsToExcel">
+              <i class="bi bi-file-earmark-excel"></i>
+              <span>Exportar Excel</span>
+            </button>
+            <button class="btn btn-outline-secondary shadow-sm fw-bold dashboard-action-btn d-inline-flex align-items-center justify-content-center gap-2" :disabled="isReloadingProjectInfo" @click="handleReloadProjectInfo">
+              <i class="bi bi-arrow-clockwise" :class="{ spin: isReloadingProjectInfo }"></i>
+              <span>{{ isReloadingProjectInfo ? 'Recargando...' : 'Recargar Informacion' }}</span>
+            </button>
+          </div>
         </div>
       </div>
 
       <div class="row g-4 mb-4">
         <div v-for="card in visibleTopCards" :key="card.label" :class="isSalesRole ? 'col-xl-3 col-lg-4 col-md-6' : 'col-xl col-md-4 col-sm-6'">
-          <div class="card border-0 shadow-sm rounded-4 h-100 p-3 stat-card-v2">
+          <div class="card border-0 shadow-sm rounded-4 h-100 p-3 stat-card-v2" :style="{ '--card-accent-color': card.accentColor }">
             <div class="d-flex justify-content-between mb-3">
               <span class="text-uppercase ls-1 fw-bold text-slate-400 smaller-text">{{ card.label }}</span>
               <div :class="['card-icon-box', card.colorClass]">
@@ -83,22 +97,25 @@
         </div>
 
         <div :class="isSalesRole ? 'col-xl-4 col-12' : 'col-xl-3 col-12'">
-          <div class="card border-0 shadow-sm rounded-4 p-4 h-100 bg-white">
+          <div class="card border-0 shadow-sm rounded-4 p-4 h-100 bg-white buildings-summary-card">
             <div class="d-flex justify-content-between align-items-center mb-4">
               <h5 class="fw-bold text-slate-900 mb-0">Edificios</h5>
               <span class="text-primary-custom smaller-text fw-bold">{{ filteredBuildingStats.length }} / {{ buildingStats.length }}</span>
             </div>
             <p class="text-slate-400 smaller-text mb-3">Resumen de avance por edificio</p>
 
-            <div class="building-search mb-4">
-              <i class="bi bi-search"></i>
+            <div class="input-group mb-4">
+              <span class="input-group-text">
+                <i class="bi bi-search"></i>
+              </span>
               <input
                 v-model="buildingSearch"
+                class="form-control"
                 type="search"
                 placeholder="Buscar edificio..."
                 aria-label="Buscar edificio"
               >
-              <button v-if="buildingSearch" type="button" @click="buildingSearch = ''" aria-label="Limpiar busqueda">
+              <button v-if="buildingSearch" class="btn btn-outline-secondary" type="button" @click="buildingSearch = ''" aria-label="Limpiar busqueda">
                 <i class="bi bi-x-lg"></i>
               </button>
             </div>
@@ -140,10 +157,10 @@
 
       <div v-if="!isSalesRole" class="row g-4 mb-4">
         <div class="col-xl-4 col-md-6">
-          <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100">
+          <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100 dashboard-bottom-card deliveries-card">
             <div class="d-flex justify-content-between align-items-center mb-4 gap-2 flex-wrap">
               <h5 class="fw-bold text-slate-900 mb-0">Entregas por mes</h5>
-              <select v-model="selectedDeliveryYear" class="form-select form-select-sm year-select" :disabled="deliveredYears.length <= 1">
+              <select v-model="selectedDeliveryYear" class="form-select form-select-sm w-auto" :disabled="deliveredYears.length <= 1">
                 <option v-for="year in deliveredYears" :key="year" :value="String(year)">{{ year }}</option>
               </select>
             </div>
@@ -161,7 +178,7 @@
         </div>
 
         <div class="col-xl-4 col-md-6">
-          <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100">
+          <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100 dashboard-bottom-card distribution-card">
             <h5 class="fw-bold text-slate-900 mb-4">Distribucion por estado</h5>
             <div class="d-flex align-items-center justify-content-center h-100 distribution-layout gap-3">
               <div class="chart-panel chart-panel-distribution">
@@ -179,7 +196,7 @@
         </div>
 
         <div class="col-xl-4">
-          <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100">
+          <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100 dashboard-bottom-card activity-card">
             <div class="d-flex justify-content-between align-items-center mb-4">
               <h5 class="fw-bold text-slate-900 mb-0">Actividad reciente</h5>
               <span class="text-primary-custom smaller-text fw-bold">{{ recentActivities.length }}</span>
@@ -225,11 +242,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { appStore, selectProject, selectUnit, setAppMode, isSales } from '../store/appStore';
+import { appStore, selectProject, selectUnit, setAppMode, isSales, reloadProjectInfo, setVisualFilters, setDashboardFilterPopupState } from '../store/appStore';
 import type { Unit, DetailedUnit } from '../models/types';
 import Viewport3D from '../components/Viewport3D.vue';
 import ColorGuideModal from '../components/ui/ColorGuideModal.vue';
 import ExcelLikeFilter from '../components/ui/ExcelLikeFilter.vue';
+import type { FilterState } from '../components/ui/ExcelLikeFilter.vue';
 import { dashboardFilterFields, dashboardFilterLabels, dashboardFilterTypes } from '../utils/dashboardFilterFields';
 import { parseDateValue } from '../utils/normalizers';
 import { Bar } from 'vue-chartjs';
@@ -267,6 +285,22 @@ const dashboardFilteredApartments = ref<DetailedUnit[] | null>(null);
 const activeDashboardFilterCount = ref(0);
 const buildingSearch = ref('');
 const isSalesRole = computed(() => isSales());
+const isReloadingProjectInfo = computed(() => appStore.isProjectContextLoading && appStore.currentProjectId === projectId.value);
+const dashboardFilterStorageKey = computed(() => `dashboard-filter-popup-${projectId.value}`);
+const readStoredDashboardFilterPopupState = (): FilterState | null => {
+  if (!projectId.value) return null;
+
+  try {
+    const stored = sessionStorage.getItem(dashboardFilterStorageKey.value);
+    if (!stored) return null;
+    const parsed = JSON.parse(stored) as FilterState;
+    return Array.isArray(parsed.selectedFields) ? parsed : null;
+  } catch (_error) {
+    return null;
+  }
+};
+const savedDashboardFilterState = computed(() => appStore.dashboardFilterStateByProject[projectId.value] ?? null);
+const dashboardFilterPopupState = computed(() => appStore.dashboardFilterPopupState ?? savedDashboardFilterState.value?.popupState ?? readStoredDashboardFilterPopupState());
 
 const project = computed(() => appStore.projects.find((p) => p.id === projectId.value));
 const projectBuildings = computed(() => appStore.buildings.filter((b) => b.projectId === projectId.value));
@@ -292,6 +326,7 @@ const exportableUnits = computed(() => {
 const visibleDetailedUnitIds = computed(() =>
   hasDashboardFilterActive.value ? filteredProjectApartments.value.map((apartment) => apartment.id) : null
 );
+const storedDetailedUnitIds = computed(() => appStore.visualFilters.detailedUnitIds ?? savedDashboardFilterState.value?.detailedUnitIds ?? null);
 const layoutUnits = computed(() => projectBuildings.value.flatMap((building) =>
   building.units.map((unit) => ({
     ...unit,
@@ -550,10 +585,10 @@ const topCards = computed(() => {
   const availableObservation = hasDashboardFilterResult.value ? available : (projectStats.value?.disponiblesObservacion ?? available);
 
   return [
-    { label: 'Total unidades', value: totalUnits.value, subtext: `En ${buildingsCount.value} edificios`, icon: 'bi-grid-3x3-gap', colorClass: 'bg-blue-soft', subColor: 'text-slate-400' },
-    { label: 'Vendidas', value: sold, subtext: totalUnits.value > 0 ? `${soldRate}% del total` : 'Sin datos', debtText: `Monto total adeudado ${formatCurrency(totalOutstandingAmount.value)}`, icon: 'bi-bag-check', colorClass: 'bg-indigo-soft', subColor: 'text-indigo-600' },
-    { label: 'Unidades Listas', value: inspection, subtext: `Unidades Listas ${inspection} de ${totalUnits.value}`, icon: 'bi-clipboard-check', colorClass: 'bg-green-soft', subColor: 'text-green-600' },
-    { label: 'Disponibles', value: availableObservation, subtext: `Disponibles ${availableObservation} de ${totalUnits.value}`, icon: 'bi-house-door', colorClass: 'bg-amber-soft', subColor: 'text-amber-600' }
+    { label: 'Total unidades', value: totalUnits.value, subtext: `En ${buildingsCount.value} edificios`, icon: 'bi-grid-3x3-gap', colorClass: 'bg-blue-soft', accentColor: '#3b82f6', subColor: 'text-slate-400' },
+    { label: 'Vendidas', value: sold, subtext: totalUnits.value > 0 ? `${soldRate}% del total` : 'Sin datos', debtText: `Monto total adeudado ${formatCurrency(totalOutstandingAmount.value)}`, icon: 'bi-bag-check', colorClass: 'bg-indigo-soft', accentColor: '#6366f1', subColor: 'text-indigo-600' },
+    { label: 'Unidades Listas', value: inspection, subtext: `Unidades Listas ${inspection} de ${totalUnits.value}`, icon: 'bi-clipboard-check', colorClass: 'bg-green-soft', accentColor: '#22c55e', subColor: 'text-green-600' },
+    { label: 'Disponibles', value: availableObservation, subtext: `Disponibles ${availableObservation} de ${totalUnits.value}`, icon: 'bi-house-door', colorClass: 'bg-amber-soft', accentColor: '#d97706', subColor: 'text-amber-600' }
   ];
 });
 
@@ -799,15 +834,57 @@ const handleActivityClick = (unitId: string | null) => {
 const resetDashboardFilterResult = () => {
   dashboardFilteredApartments.value = null;
   activeDashboardFilterCount.value = 0;
+  setVisualFilters({ detailedUnitIds: null });
+  setDashboardFilterPopupState(null);
+  delete appStore.dashboardFilterStateByProject[projectId.value];
+  sessionStorage.removeItem(dashboardFilterStorageKey.value);
+};
+
+const hydrateDashboardFilterResult = () => {
+  const ids = storedDetailedUnitIds.value;
+  if (!Array.isArray(ids)) {
+    dashboardFilteredApartments.value = null;
+    activeDashboardFilterCount.value = 0;
+    return;
+  }
+
+  dashboardFilteredApartments.value = projectApartments.value.filter((apartment) => ids.includes(apartment.id));
+  activeDashboardFilterCount.value = dashboardFilterPopupState.value?.selectedFields.length || activeDashboardFilterCount.value || 1;
 };
 
 const handleDashboardFilterApply = (result: { filteredItems: unknown[]; activeFilters: { field: string; value: string }[] }) => {
   dashboardFilteredApartments.value = result.filteredItems as DetailedUnit[];
   activeDashboardFilterCount.value = result.activeFilters.length;
+  const detailedUnitIds = result.activeFilters.length > 0
+    ? dashboardFilteredApartments.value.map((apartment) => apartment.id)
+    : null;
+  setVisualFilters({
+    detailedUnitIds
+  });
+  appStore.dashboardFilterStateByProject[projectId.value] = {
+    detailedUnitIds,
+    popupState: dashboardFilterPopupState.value
+  };
+};
+
+const handleDashboardFilterStateChange = (state: FilterState | null) => {
+  setDashboardFilterPopupState(state);
+  if (!projectId.value) return;
+
+  appStore.dashboardFilterStateByProject[projectId.value] = {
+    detailedUnitIds: storedDetailedUnitIds.value,
+    popupState: state
+  };
 };
 
 const handleDashboardFilterClear = () => {
   resetDashboardFilterResult();
+};
+
+const handleReloadProjectInfo = async () => {
+  if (!projectId.value || isReloadingProjectInfo.value) return;
+  resetDashboardFilterResult();
+  await reloadProjectInfo(projectId.value);
 };
 
 onMounted(() => {
@@ -816,9 +893,30 @@ onMounted(() => {
 
 watch(projectId, (newId) => {
   if (!newId) return;
-  resetDashboardFilterResult();
+  const storedPopupState = readStoredDashboardFilterPopupState();
+  const shouldPreserveVisualFilters = (Array.isArray(storedDetailedUnitIds.value) || Boolean(storedPopupState))
+    && (appStore.currentProjectId === newId || Boolean(savedDashboardFilterState.value) || Boolean(storedPopupState));
+  if (!shouldPreserveVisualFilters) {
+    resetDashboardFilterResult();
+  }
   selectProject(newId);
+  if (shouldPreserveVisualFilters) {
+    const popupState = savedDashboardFilterState.value?.popupState ?? storedPopupState;
+    if (popupState) {
+      setDashboardFilterPopupState(popupState);
+    }
+    if (Array.isArray(storedDetailedUnitIds.value)) {
+      setVisualFilters({ detailedUnitIds: storedDetailedUnitIds.value });
+    }
+    hydrateDashboardFilterResult();
+  }
 }, { immediate: true });
+
+watch([projectApartments, storedDetailedUnitIds], () => {
+  if (Array.isArray(storedDetailedUnitIds.value)) {
+    hydrateDashboardFilterResult();
+  }
+});
 </script>
 
 <style scoped>
@@ -857,13 +955,47 @@ watch(projectId, (newId) => {
   color: white;
 }
 
-.year-select {
-  min-width: 92px;
-  border-radius: 999px;
-  border-color: #dbeafe;
-  color: #1d4ed8;
-  background-color: #eff6ff;
-  font-weight: 700;
+.dashboard-actions-toolbar {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+  width: auto;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.dashboard-action-btn {
+  flex: 0 1 auto;
+  min-height: 42px;
+  font-size: 0.84rem;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.dashboard-filter-action :deep(.filter-trigger) {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  color: #64748b;
+  transition: all 0.2s;
+}
+
+.dashboard-filter-action :deep(.filter-trigger:hover),
+.dashboard-filter-action :deep(.filter-trigger.active) {
+  background: #ffffff !important;
+  color: #3b82f6 !important;
+  border-color: #3b82f6 !important;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1) !important;
+}
+
+.dashboard-filter-action {
+  flex: 0 1 170px;
+}
+
+.dashboard-filter-action :deep(.filter-popover) {
+  left: 0;
+  right: auto;
 }
 
 .dashboard-filter-card {
@@ -912,11 +1044,21 @@ watch(projectId, (newId) => {
 }
 
 .stat-card-v2 {
+  border-left: 5px solid var(--card-accent-color, #3b82f6) !important;
   transition: transform 0.2s;
 }
 
 .stat-card-v2:hover {
   transform: translateY(-2px);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .card-subtext-row {
@@ -1045,50 +1187,27 @@ watch(projectId, (newId) => {
   padding-right: 8px;
 }
 
-.building-search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  padding: 0 10px;
-  border: 1px solid #e2e8f0;
-  border-radius: 999px;
-  background: #f8fafc;
-  color: #94a3b8;
+.buildings-summary-card {
+  position: relative;
+  overflow: hidden;
+  border-top: 5px solid #3b82f6 !important;
 }
 
-.building-search input {
-  min-width: 0;
-  flex: 1;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: #334155;
-  font-size: 0.85rem;
-  font-weight: 650;
+.dashboard-bottom-card {
+  overflow: hidden;
+  border-top: 5px solid var(--bottom-card-accent, #3b82f6) !important;
 }
 
-.building-search input::placeholder {
-  color: #94a3b8;
-  font-weight: 600;
+.deliveries-card {
+  --bottom-card-accent: #22c55e;
 }
 
-.building-search button {
-  border: none;
-  background: transparent;
-  color: #94a3b8;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 999px;
-  padding: 0;
+.distribution-card {
+  --bottom-card-accent: #6366f1;
 }
 
-.building-search button:hover {
-  background: #e2e8f0;
-  color: #334155;
+.activity-card {
+  --bottom-card-accent: #f97316;
 }
 
 .bld-accent { width: 4px; height: 16px; border-radius: 2px; }
@@ -1189,6 +1308,27 @@ watch(projectId, (newId) => {
 }
 
 @media (max-width: 992px) {
+  .dashboard-actions-toolbar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    overflow: visible;
+  }
+
+  .dashboard-action-btn,
+  .dashboard-filter-action {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .dashboard-filter-action {
+    grid-column: 1 / -1;
+  }
+
+  .dashboard-action-btn {
+    white-space: normal;
+  }
+
   .main-3d-card {
     height: 520px;
   }

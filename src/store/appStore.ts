@@ -39,6 +39,26 @@ let authInitializationPromise: Promise<void> | null = null;
 let projectsLoadPromise: Promise<Project[]> | null = null;
 let usersLoadPromise: Promise<User[]> | null = null;
 let availableProjectIdsLoadPromise: Promise<string[]> | null = null;
+const detailedProjectIds = new Set<string>();
+
+export type DashboardFilterPopupState = {
+    selectedFields: string[];
+    values: Record<string, string>;
+    ranges: Record<string, { from: string; to: string }>;
+    textSelections: Record<string, string[]>;
+    sortDirection: 'asc' | 'desc' | null;
+};
+
+export type DashboardFilterRouteState = {
+    detailedUnitIds: number[] | null;
+    popupState: DashboardFilterPopupState | null;
+};
+
+export type CameraViewState = {
+    position: { x: number; y: number; z: number };
+    target: { x: number; y: number; z: number };
+    zoom: number;
+};
 
 const loadXlsx = () => import('xlsx');
 
@@ -181,18 +201,27 @@ export const consumeAuthReturnTo = () => {
 };
 
 const syncProjectsState = (projects: Project[]) => {
-    appStore.projects = projects;
-    appStore.availableProjectIds = projects.map(project => project.id);
+    appStore.projects = projects.map((project) => {
+        const existingProject = appStore.projects.find(item => item.id === project.id);
+        if (!existingProject) return project;
+
+        const incomingBlueprint = (project as Partial<Project>).imagenPlano;
+        return {
+            ...existingProject,
+            ...project,
+            imagenPlano: incomingBlueprint || existingProject.imagenPlano
+        };
+    });
 };
 
 const upsertProjectState = (project: Project) => {
     const index = appStore.projects.findIndex(item => item.id === project.id);
+    detailedProjectIds.add(project.id);
     if (index >= 0) {
         appStore.projects[index] = project;
     } else {
         appStore.projects.push(project);
     }
-    appStore.availableProjectIds = [...new Set([...appStore.availableProjectIds, project.id])];
 };
 
 const syncProjectLayoutState = (projectId: string, buildings: Building[], gridSize?: number, blueprintTransform?: BlueprintTransform | null) => {
@@ -245,9 +274,29 @@ const normalizeUsersResponse = (payload: unknown): User[] => {
 
 const normalizeStringListResponse = (payload: unknown): string[] => {
     const source = payload as ApiSheetsResponse & { sheets?: unknown };
-    if (Array.isArray(source)) {
-        return source.filter(item => typeof item === 'string') as string[];
-    }
+    const normalizeList = (list: unknown[]) => {
+        const values = list
+            .map((item) => {
+                if (typeof item === 'string' || typeof item === 'number') return String(item);
+                if (!item || typeof item !== 'object') return '';
+
+                const record = item as Record<string, unknown>;
+                const value = record.name
+                    ?? record.Name
+                    ?? record.sheet
+                    ?? record.Sheet
+                    ?? record.id
+                    ?? record.Id;
+
+                return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+            })
+            .map((item) => item.trim())
+            .filter(Boolean);
+
+        return [...new Set(values)];
+    };
+
+    if (Array.isArray(source)) return normalizeList(source);
 
     if (!source || typeof source !== 'object') return [];
 
@@ -255,7 +304,7 @@ const normalizeStringListResponse = (payload: unknown): string[] => {
 
     for (const list of possibleLists) {
         if (Array.isArray(list)) {
-            return list.filter(item => typeof item === 'string') as string[];
+            return normalizeList(list);
         }
     }
 
@@ -1070,6 +1119,9 @@ interface AppState {
         descargadaDGII: boolean | null;
         saldo: boolean | null;
     };
+    dashboardFilterPopupState: DashboardFilterPopupState | null;
+    dashboardFilterStateByProject: Record<string, DashboardFilterRouteState>;
+    cameraStateByProject: Record<string, CameraViewState>;
 }
 
 export const appStore = reactive<AppState>({
@@ -1115,30 +1167,47 @@ export const appStore = reactive<AppState>({
         titulo: null,
         descargadaDGII: null,
         saldo: null
-    }
+    },
+    dashboardFilterPopupState: null,
+    dashboardFilterStateByProject: {},
+    cameraStateByProject: {}
 });
 
 export const selectProject = (id: string | null) => {
+    const isSameProject = appStore.currentProjectId === id;
+
     appStore.currentProjectId = id;
     appStore.selectedBuildingId = null;
     appStore.selectedUnitId = null;
-    appStore.visualFilters = {
-        detailedUnitIds: null,
-        status: null,
-        bank: null,
-        hasDebt: null,
-        enInspeccion: null,
-        legal: null,
-        titulo: null,
-        descargadaDGII: null,
-        saldo: null
-    };
+    if (!isSameProject) {
+        appStore.visualFilters = {
+            detailedUnitIds: null,
+            status: null,
+            bank: null,
+            hasDebt: null,
+            enInspeccion: null,
+            legal: null,
+            titulo: null,
+            descargadaDGII: null,
+            saldo: null
+        };
+        appStore.dashboardFilterPopupState = null;
+    }
 
     if (id) {
+        syncCurrentProjectApartments(id);
+
+        const hasDetailedProject = detailedProjectIds.has(id);
+        if (isSameProject && appStore.isProjectContextLoading) {
+            return;
+        }
+        if (isSameProject && hasDetailedProject && appStore.currentProjectLayoutStatus !== 'idle') {
+            return;
+        }
+
         appStore.gridSize = DEFAULT_GRID_SIZE;
         appStore.blueprintTransform = null;
         clearProjectLayoutState(id);
-        syncCurrentProjectApartments(id);
         appStore.currentProjectLayoutStatus = 'loading';
         appStore.currentProjectLayoutMessage = '';
         appStore.isProjectContextLoading = true;
@@ -1157,6 +1226,29 @@ export const selectProject = (id: string | null) => {
         appStore.currentProjectLayoutStatus = 'idle';
         appStore.currentProjectLayoutMessage = '';
         appStore.isProjectContextLoading = false;
+    }
+};
+
+export const reloadProjectInfo = async (id = appStore.currentProjectId) => {
+    if (!id) return;
+
+    appStore.currentProjectId = id;
+    syncCurrentProjectApartments(id);
+    appStore.currentProjectLayoutStatus = 'loading';
+    appStore.currentProjectLayoutMessage = '';
+    appStore.isProjectContextLoading = true;
+
+    try {
+        await Promise.allSettled([
+            loadProject(id),
+            loadProjectLayout(id),
+            loadProjectApartments(id),
+            loadProjectApartmentStats(id)
+        ]);
+    } finally {
+        if (appStore.currentProjectId === id) {
+            appStore.isProjectContextLoading = false;
+        }
     }
 };
 
@@ -1236,6 +1328,21 @@ export const setBlueprintTransform = (transform: BlueprintTransform | Partial<Bl
 
 export const setVisualFilters = (filters: Partial<AppState['visualFilters']>) => {
     appStore.visualFilters = { ...appStore.visualFilters, ...filters };
+};
+
+export const setDashboardFilterPopupState = (state: DashboardFilterPopupState | null) => {
+    appStore.dashboardFilterPopupState = state;
+    if (!appStore.currentProjectId) return;
+
+    if (!state) {
+        delete appStore.dashboardFilterStateByProject[appStore.currentProjectId];
+        return;
+    }
+
+    appStore.dashboardFilterStateByProject[appStore.currentProjectId] = {
+        detailedUnitIds: appStore.visualFilters.detailedUnitIds,
+        popupState: state
+    };
 };
 
 export const addUnitToBuilding = (buildingId: string) => {
@@ -2363,8 +2470,8 @@ export const addProject = async (project: Project) => {
             throw new Error('No se pudo crear el proyecto.');
         }
         const createdProject = normalizeProjectResponse(await response.json()) ?? project;
+        detailedProjectIds.add(createdProject.id);
         appStore.projects.push(createdProject);
-        appStore.availableProjectIds = appStore.projects.map(item => item.id);
         return createdProject;
     } catch (_error) {
         return null;
@@ -2389,6 +2496,7 @@ export const updateProject = async (id: string, updates: Partial<Project>) => {
             throw new Error('No se pudo actualizar el proyecto.');
         }
         const updatedProject = normalizeProjectResponse(await response.json()) ?? { ...project, ...updates };
+        detailedProjectIds.add(updatedProject.id);
         Object.assign(project, updatedProject);
         return updatedProject;
     } catch (_error) {
@@ -2411,8 +2519,8 @@ export const deleteProject = async (id: string) => {
         const index = appStore.projects.findIndex(p => p.id === id);
         if (index > -1) {
             appStore.projects.splice(index, 1);
-            appStore.availableProjectIds = appStore.projects.map(item => item.id);
         }
+        detailedProjectIds.delete(id);
         return true;
     } catch (_error) {
         return false;

@@ -16,6 +16,25 @@
         <span>Menú</span>
       </button>
 
+      <router-link
+        v-if="currentProjectId"
+        :to="{ name: 'dashboard', params: { id: currentProjectId } }"
+        class="btn-glass-dashboard toolbar-mobile-only"
+      >
+        <i class="bi bi-speedometer2"></i>
+        <span>Dashboard</span>
+      </router-link>
+
+      <button
+        v-if="currentProjectId"
+        class="btn-glass-reload toolbar-mobile-only"
+        :disabled="isReloadingProjectInfo"
+        @click="handleReloadProjectInfo"
+      >
+        <i class="bi bi-arrow-clockwise" :class="{ spin: isReloadingProjectInfo }"></i>
+        <span>Recargar Informacion</span>
+      </button>
+
       <div class="header-divider"></div>
 
       <div class="mode-status-badge toolbar-mobile-only" :class="appMode">
@@ -38,6 +57,25 @@
       <div class="spacer toolbar-desktop-only"></div>
 
       <div class="toolbar-desktop-only desktop-controls d-flex align-items-center gap-2">
+        <router-link
+          v-if="currentProjectId"
+          :to="{ name: 'dashboard', params: { id: currentProjectId } }"
+          class="btn-glass-dashboard"
+        >
+          <i class="bi bi-speedometer2"></i>
+          <span>Dashboard</span>
+        </router-link>
+
+        <button
+          v-if="currentProjectId"
+          class="btn-glass-reload"
+          :disabled="isReloadingProjectInfo"
+          @click="handleReloadProjectInfo"
+        >
+          <i class="bi bi-arrow-clockwise" :class="{ spin: isReloadingProjectInfo }"></i>
+          <span>{{ isReloadingProjectInfo ? 'Recargando...' : 'Recargar Informacion' }}</span>
+        </button>
+
         <div v-if="appMode === 'edit' && !re_isViewer()" class="control-group d-flex align-items-center gap-2">
           <div class="form-check form-switch m-0">
             <input class="form-check-input" type="checkbox" role="switch" :checked="dragBuildingsEnabled" @change="toggleDragBuildings">
@@ -145,9 +183,12 @@
             :visible-fields="dashboardFilterFields"
             :field-labels="dashboardFilterLabels"
             :field-types="dashboardFilterTypes"
+            :state="dashboardFilterPopupState"
+            :storage-key="dashboardFilterStorageKey"
             trigger-label="Filtros"
             @apply="handleEditorFilterApply"
             @clear="handleEditorFilterClear"
+            @state-change="handleEditorFilterStateChange"
           />
         </div>
 
@@ -277,9 +318,12 @@
             :visible-fields="dashboardFilterFields"
             :field-labels="dashboardFilterLabels"
             :field-types="dashboardFilterTypes"
+            :state="dashboardFilterPopupState"
+            :storage-key="dashboardFilterStorageKey"
             trigger-label="Filtros"
             @apply="handleEditorFilterApply"
             @clear="handleEditorFilterClear"
+            @state-change="handleEditorFilterStateChange"
           />
         </div>
 
@@ -315,9 +359,9 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import { appStore, setAppMode, setGridSize, setDragBuildingsEnabled, canEditData, isViewer, setVisualFilters, setBlueprintTransform, updateCurrentProjectBuildingDimensions } from '../../store/appStore';
+import { appStore, setAppMode, setGridSize, setDragBuildingsEnabled, canEditData, isViewer, setVisualFilters, setBlueprintTransform, updateCurrentProjectBuildingDimensions, reloadProjectInfo, setDashboardFilterPopupState } from '../../store/appStore';
 import type { BlueprintTransform } from '../../models/types';
-import ExcelLikeFilter, { type FilterResult } from './ExcelLikeFilter.vue';
+import ExcelLikeFilter, { type FilterResult, type FilterState } from './ExcelLikeFilter.vue';
 import { dashboardFilterFields, dashboardFilterLabels, dashboardFilterTypes } from '../../utils/dashboardFilterFields';
 
 const re_canEditData = () => canEditData();
@@ -340,6 +384,15 @@ const emit = defineEmits<{
 }>();
 
 const appMode = computed(() => appStore.appMode);
+const currentProjectId = computed(() => appStore.currentProjectId);
+const isReloadingProjectInfo = computed(() => appStore.isProjectContextLoading && appStore.currentProjectId === currentProjectId.value);
+const dashboardFilterStorageKey = computed(() => currentProjectId.value ? `dashboard-filter-popup-${currentProjectId.value}` : '');
+const dashboardFilterPopupState = computed(() => {
+  const projectId = currentProjectId.value;
+  return appStore.dashboardFilterPopupState
+    ?? (projectId ? appStore.dashboardFilterStateByProject[projectId]?.popupState : null)
+    ?? null;
+});
 const showEditorFilters = computed(() => appMode.value === 'view' || (appMode.value === 'edit' && canEditData()));
 const gridSize = computed(() => appStore.gridSize);
 const dragBuildingsEnabled = computed(() => appStore.dragBuildingsEnabled);
@@ -429,6 +482,10 @@ watch(averageDimensions, (dimensions) => {
 }, { immediate: true });
 
 const setMode = (mode: 'edit' | 'view') => setAppMode(mode);
+const handleReloadProjectInfo = async () => {
+  if (!currentProjectId.value || isReloadingProjectInfo.value) return;
+  await reloadProjectInfo(currentProjectId.value);
+};
 const toggleBlueprintControls = () => {
   showBlueprintControls.value = !showBlueprintControls.value;
   if (showBlueprintControls.value && !appStore.blueprintTransform) {
@@ -445,11 +502,28 @@ const handleEditorFilterApply = (result: FilterResult) => {
     .map((item) => Number((item as { id?: unknown }).id))
     .filter((id) => Number.isFinite(id));
 
+  const detailedUnitIds = result.activeFilters.length > 0 ? filteredUnitIds : null;
   setVisualFilters({
-    detailedUnitIds: result.activeFilters.length > 0 ? filteredUnitIds : null
+    detailedUnitIds
   });
+
+  if (currentProjectId.value) {
+    appStore.dashboardFilterStateByProject[currentProjectId.value] = {
+      detailedUnitIds,
+      popupState: dashboardFilterPopupState.value
+    };
+  }
 };
-const handleEditorFilterClear = () => setVisualFilters({ detailedUnitIds: null });
+const handleEditorFilterStateChange = (state: FilterState | null) => {
+  setDashboardFilterPopupState(state);
+};
+const handleEditorFilterClear = () => {
+  setVisualFilters({ detailedUnitIds: null });
+  setDashboardFilterPopupState(null);
+  if (currentProjectId.value) {
+    delete appStore.dashboardFilterStateByProject[currentProjectId.value];
+  }
+};
 const clampDimension = (value: number, min: number, max: number) => Math.max(min, Math.min(max, Number(value) || min));
 const updateBlueprintTransformValue = (key: keyof BlueprintTransform, event: Event) => {
   const rawValue = Number((event.target as HTMLInputElement).value);
@@ -672,7 +746,7 @@ const onFileChange = (event: Event) => {
   gap: 8px;
 }
 
-.btn-glass-primary, .btn-glass-save, .btn-glass-outline { border: none; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; cursor: pointer; transition: all 0.2s; }
+.btn-glass-primary, .btn-glass-save, .btn-glass-outline, .btn-glass-dashboard, .btn-glass-reload { border: none; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; cursor: pointer; transition: all 0.2s; }
 .btn-glass-primary { background: #0f172a; color: white; box-shadow: 0 4px 12px rgba(15,23,42,0.15); }
 .btn-glass-save { background: #22c55e; color: white; box-shadow: 0 4px 12px rgba(34,197,94,0.18); }
 .btn-glass-save:hover:not(:disabled) { background: #16a34a; transform: translateY(-1px); }
@@ -680,6 +754,38 @@ const onFileChange = (event: Event) => {
 .btn-glass-primary:hover { background: #1e293b; transform: translateY(-1px); box-shadow: 0 6px 16px rgba(15,23,42,0.2); }
 .btn-glass-outline { background: rgba(255,255,255,0.5); color: #64748b; border: 1px solid rgba(0,0,0,0.08); padding: 8px 12px; font-size: 18px; }
 .btn-glass-outline:hover { background: white; color: #0f172a; border-color: rgba(0,0,0,0.15); }
+.btn-glass-dashboard {
+  min-height: 38px;
+  background: rgba(37,99,235,0.1);
+  color: #1d4ed8;
+  border: 1px solid rgba(37,99,235,0.18);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.btn-glass-dashboard:hover {
+  background: #2563eb;
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(37,99,235,0.18);
+}
+.btn-glass-reload {
+  min-height: 38px;
+  background: rgba(15,23,42,0.06);
+  color: #334155;
+  border: 1px solid rgba(15,23,42,0.1);
+  white-space: nowrap;
+}
+.btn-glass-reload:hover:not(:disabled) {
+  background: #ffffff;
+  color: #0f172a;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(15,23,42,0.12);
+}
+.btn-glass-reload:disabled {
+  opacity: 0.72;
+  cursor: wait;
+  transform: none;
+}
 .spin { animation: spin 1s linear infinite; }
 
 .toolbar-collapse-toggle {
@@ -760,6 +866,8 @@ const onFileChange = (event: Event) => {
   .btn-glass-primary,
   .btn-glass-save,
   .btn-glass-outline,
+  .btn-glass-dashboard,
+  .btn-glass-reload,
   .btn-glass-filter {
     padding-left: 10px;
     padding-right: 10px;
@@ -829,10 +937,26 @@ const onFileChange = (event: Event) => {
     padding: 0 10px;
     font-size: 12px;
   }
+  .btn-glass-dashboard.toolbar-mobile-only {
+    min-height: 36px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+  .btn-glass-reload.toolbar-mobile-only {
+    min-height: 36px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
 }
 
 @media (max-width: 380px) {
   .toolbar-glass { left: 60px; }
   .glass-range { width: 80px; }
+  .btn-glass-dashboard.toolbar-mobile-only span {
+    display: none;
+  }
+  .btn-glass-reload.toolbar-mobile-only span {
+    display: none;
+  }
 }
 </style>

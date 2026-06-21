@@ -1,6 +1,6 @@
 <template>
   <div ref="rootEl" class="excel-filter">
-    <button class="filter-trigger" :class="{ active: activeFilterCount > 0 || isOpen }" @click="togglePanel">
+    <button class="filter-trigger" :class="[triggerClass, { active: activeFilterCount > 0 || isOpen }]" @click="togglePanel">
       <i class="bi bi-funnel"></i>
       <span>{{ triggerLabel }}</span>
       <span v-if="activeFilterCount > 0" class="filter-badge">{{ activeFilterCount }}</span>
@@ -127,6 +127,14 @@ export interface FilterResult<T = unknown> {
   activeFilters: ActiveJsonFilter[];
 }
 
+export interface FilterState {
+  selectedFields: string[];
+  values: Record<string, string>;
+  ranges: Record<string, RangeFilterValue>;
+  textSelections: Record<string, string[]>;
+  sortDirection: FilterSortDirection;
+}
+
 const props = withDefaults(defineProps<{
   items: unknown[];
   excludeFields?: string[];
@@ -134,17 +142,24 @@ const props = withDefaults(defineProps<{
   fieldLabels?: Record<string, string>;
   fieldTypes?: Record<string, FilterKind>;
   triggerLabel?: string;
+  triggerClass?: string;
+  state?: FilterState | null;
+  storageKey?: string;
 }>(), {
   excludeFields: () => [],
   visibleFields: () => [],
   fieldLabels: () => ({}),
   fieldTypes: () => ({}),
-  triggerLabel: 'Filtros'
+  triggerLabel: 'Filtros',
+  triggerClass: '',
+  state: null,
+  storageKey: ''
 });
 
 const emit = defineEmits<{
   (event: 'apply', result: FilterResult): void;
   (event: 'clear', result: FilterResult): void;
+  (event: 'state-change', state: FilterState | null): void;
 }>();
 
 const rootEl = ref<HTMLElement | null>(null);
@@ -159,6 +174,89 @@ const appliedRanges = reactive<Record<string, RangeFilterValue>>({});
 const draftTextSelections = reactive<Record<string, string[]>>({});
 const appliedTextSelections = reactive<Record<string, string[]>>({});
 const filterSortDirection = ref<FilterSortDirection>(null);
+
+const readStoredFilterState = (): FilterState | null => {
+  if (!props.storageKey) return null;
+
+  try {
+    const stored = sessionStorage.getItem(props.storageKey);
+    if (!stored) return null;
+    const parsed = JSON.parse(stored) as FilterState;
+    if (!Array.isArray(parsed.selectedFields)) return null;
+    return parsed;
+  } catch (_error) {
+    return null;
+  }
+};
+
+const writeStoredFilterState = (state: FilterState | null) => {
+  if (!props.storageKey) return;
+
+  if (!state) {
+    sessionStorage.removeItem(props.storageKey);
+    return;
+  }
+
+  sessionStorage.setItem(props.storageKey, JSON.stringify(state));
+};
+
+const cloneValues = (values: Record<string, string>) => Object.fromEntries(
+  Object.entries(values).map(([key, value]) => [key, value ?? ''])
+);
+
+const cloneRanges = (ranges: Record<string, RangeFilterValue>) => Object.fromEntries(
+  Object.entries(ranges).map(([key, range]) => [key, { from: range.from ?? '', to: range.to ?? '' }])
+);
+
+const cloneTextSelections = (selections: Record<string, string[]>) => Object.fromEntries(
+  Object.entries(selections).map(([key, values]) => [key, [...values]])
+);
+
+const resetRecord = <T extends Record<string, unknown>>(target: T) => {
+  for (const key of Object.keys(target)) {
+    delete target[key];
+  }
+};
+
+const assignRecord = <T>(target: Record<string, T>, source: Record<string, T>) => {
+  resetRecord(target);
+  for (const [key, value] of Object.entries(source)) {
+    target[key] = value;
+  }
+};
+
+const buildFilterState = (): FilterState => ({
+  selectedFields: [...appliedSelectedFields.value],
+  values: cloneValues(appliedValues),
+  ranges: cloneRanges(appliedRanges),
+  textSelections: cloneTextSelections(appliedTextSelections),
+  sortDirection: filterSortDirection.value
+});
+
+const applyFilterState = (state: FilterState | null) => {
+  if (!state) {
+    appliedSelectedFields.value = [];
+    draftSelectedFields.value = [];
+    assignRecord(appliedValues, {});
+    assignRecord(draftValues, {});
+    assignRecord(appliedRanges, {});
+    assignRecord(draftRanges, {});
+    assignRecord(appliedTextSelections, {});
+    assignRecord(draftTextSelections, {});
+    filterSortDirection.value = null;
+    return;
+  }
+
+  appliedSelectedFields.value = [...state.selectedFields];
+  draftSelectedFields.value = [...state.selectedFields];
+  assignRecord(appliedValues, cloneValues(state.values));
+  assignRecord(draftValues, cloneValues(state.values));
+  assignRecord(appliedRanges, cloneRanges(state.ranges));
+  assignRecord(draftRanges, cloneRanges(state.ranges));
+  assignRecord(appliedTextSelections, cloneTextSelections(state.textSelections));
+  assignRecord(draftTextSelections, cloneTextSelections(state.textSelections));
+  filterSortDirection.value = state.sortDirection ?? null;
+};
 
 const normalizeText = (value: unknown) => String(value ?? '')
   .trim()
@@ -479,7 +577,12 @@ const syncDraftFromApplied = () => {
 
 const togglePanel = () => {
   if (!isOpen.value) {
-    syncDraftFromApplied();
+    const state = props.state ?? readStoredFilterState();
+    if (state) {
+      applyFilterState(state);
+    } else {
+      syncDraftFromApplied();
+    }
   }
   isOpen.value = !isOpen.value;
 };
@@ -509,6 +612,9 @@ const applyDraftFilters = () => {
   }
 
   emitAppliedResult();
+  const nextState = buildFilterState();
+  writeStoredFilterState(nextState);
+  emit('state-change', nextState);
   isOpen.value = false;
 };
 
@@ -538,6 +644,9 @@ const clearAllFilters = () => {
   for (const key of Object.keys(appliedTextSelections)) {
     delete appliedTextSelections[key];
   }
+  filterSortDirection.value = null;
+  writeStoredFilterState(null);
+  emit('state-change', null);
   emitClearResult();
 };
 
@@ -587,9 +696,25 @@ watch(draftSelectedFields, (fields) => {
 });
 
 watch(() => props.items, () => {
+  if (props.state && props.items.length === 0) {
+    applyFilterState(props.state);
+    return;
+  }
+
+  if (props.state) {
+    applyFilterState(props.state);
+  }
   pruneUnavailableFilters();
   emitAppliedResult();
 }, { deep: true });
+
+watch(() => props.state, (state) => {
+  applyFilterState(state ?? readStoredFilterState());
+}, { immediate: true, deep: true });
+
+watch(() => props.storageKey, () => {
+  applyFilterState(props.state ?? readStoredFilterState());
+});
 
 onMounted(() => {
   document.addEventListener('pointerdown', onDocumentPointerDown);
@@ -606,7 +731,7 @@ onUnmounted(() => {
   display: inline-flex;
 }
 
-.filter-trigger {
+.filter-trigger:not(.btn) {
   min-height: 42px;
   display: inline-flex;
   align-items: center;
@@ -621,7 +746,7 @@ onUnmounted(() => {
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
 }
 
-.filter-trigger.active {
+.filter-trigger.active:not(.btn) {
   background: #eff6ff;
   border-color: #3b82f6;
   color: #1d4ed8;
