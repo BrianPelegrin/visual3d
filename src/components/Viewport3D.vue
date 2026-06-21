@@ -2,7 +2,7 @@
   <div class="viewport-wrapper">
     <Toolbar v-if="!hideUI" @blueprint-loaded="onBlueprintLoaded" @blueprint-auto-fit="handleBlueprintAutoFit" @generate-from-apartments="onGenerateFromApartments" @add-building="handleAddBuilding" @save-layout="handleSaveLayout" @open-color-guide="showColorGuide = true" />
     <PropertiesPanel v-if="!hideUI" />
-    <UnitInfoWindow v-if="!hideUI || showUnitInfo" />
+    <UnitInfoWindow v-if="!hideUI || showUnitInfo" :display-mode="unitInfoDisplayMode" />
     <ColorGuideModal :show="showColorGuide" @close="showColorGuide = false" />
     <div ref="canvasContainer" class="canvas-container"></div>
 
@@ -68,6 +68,7 @@ const effectiveVisualFilters = computed(() => ({
   ...appStore.visualFilters,
   detailedUnitIds: props.visibleDetailedUnitIds ?? appStore.visualFilters.detailedUnitIds ?? null
 }));
+const unitInfoDisplayMode = computed(() => props.hideUI && props.showUnitInfo ? 'modal' : 'popover');
 const projectBuildings = computed(() => {
   if (!appStore.currentProjectId) return [];
   return appStore.buildings.filter((b) => b.projectId === appStore.currentProjectId);

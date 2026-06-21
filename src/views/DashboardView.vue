@@ -80,7 +80,8 @@
                 <i class="bi bi-pin-angle-fill me-1"></i>
                 {{ selectedUnitSummary }}
               </div>
-              <Viewport3D hideUI show-unit-info :visible-detailed-unit-ids="visibleDetailedUnitIds" />
+              <Viewport3D hideUI :visible-detailed-unit-ids="visibleDetailedUnitIds" />
+              <UnitInfoWindow v-if="dashboardUnitDetailsModalVisible" display-mode="modal" />
               <ColorGuideModal :show="showColorGuide" @close="showColorGuide = false" />
               <div v-if="!isSalesRole" class="viewport-legend">
                 <button class="legend-help-btn" @click="showColorGuide = true">
@@ -93,6 +94,20 @@
                 </div>
               </div>
             </div>
+          </div>
+          <div class="dashboard-unit-details-action mt-3">
+            <button
+              type="button"
+              class="btn w-100  btn-primary shadow-sm px-4 py-2 fw-bold d-inline-flex align-items-center gap-2"
+              :disabled="!selectedUnitDetailName"
+              @click="openDashboardUnitDetails"
+            >
+            <span class="text-center w-100">
+
+              <i class="bi bi-eye-fill"></i>
+              {{ selectedUnitDetailName ? `Ver detalles de la unidad ${selectedUnitDetailName}` : 'Selecciona una unidad' }}
+            </span>
+            </button>
           </div>
         </div>
 
@@ -246,6 +261,7 @@ import { appStore, selectProject, selectUnit, setAppMode, isSales, reloadProject
 import type { Unit, DetailedUnit } from '../models/types';
 import Viewport3D from '../components/Viewport3D.vue';
 import ColorGuideModal from '../components/ui/ColorGuideModal.vue';
+import UnitInfoWindow from '../components/ui/UnitInfoWindow.vue';
 import ExcelLikeFilter from '../components/ui/ExcelLikeFilter.vue';
 import type { FilterState } from '../components/ui/ExcelLikeFilter.vue';
 import { dashboardFilterFields, dashboardFilterLabels, dashboardFilterTypes } from '../utils/dashboardFilterFields';
@@ -281,6 +297,7 @@ const STATUS_META: Record<DashboardStatus, StatusMeta> = {
 const route = useRoute();
 const projectId = computed(() => String(route.params.id ?? ''));
 const showColorGuide = ref(false);
+const dashboardUnitDetailsModalVisible = ref(false);
 const dashboardFilteredApartments = ref<DetailedUnit[] | null>(null);
 const activeDashboardFilterCount = ref(0);
 const buildingSearch = ref('');
@@ -807,11 +824,19 @@ const recentActivities = computed(() => {
     }));
 });
 
+const selectedLayoutUnit = computed(() => {
+  if (!appStore.selectedUnitId) return null;
+  return layoutUnits.value.find((unit) => unit.id === appStore.selectedUnitId) ?? null;
+});
+
+const selectedUnitDetailName = computed(() => {
+  if (!selectedLayoutUnit.value) return '';
+  return `${selectedLayoutUnit.value.name} (${selectedLayoutUnit.value.buildingName})`;
+});
+
 const selectedUnitSummary = computed(() => {
-  if (!appStore.selectedUnitId) return '';
-  const layoutUnit = layoutUnits.value.find((unit) => unit.id === appStore.selectedUnitId);
-  if (!layoutUnit) return '';
-  return `Unidad seleccionada: ${layoutUnit.name} (${layoutUnit.buildingName})`;
+  if (!selectedUnitDetailName.value) return '';
+  return `Unidad seleccionada: ${selectedUnitDetailName.value}`;
 });
 
 const layoutNotice = computed(() => {
@@ -829,6 +854,11 @@ const layoutNoticeTone = computed(() => {
 const handleActivityClick = (unitId: string | null) => {
   if (!unitId) return;
   selectUnit(unitId);
+};
+
+const openDashboardUnitDetails = () => {
+  if (!appStore.selectedUnitId) return;
+  dashboardUnitDetailsModalVisible.value = true;
 };
 
 const resetDashboardFilterResult = () => {
@@ -889,6 +919,10 @@ const handleReloadProjectInfo = async () => {
 
 onMounted(() => {
   setAppMode('view');
+});
+
+watch(() => appStore.selectedUnitId, () => {
+  dashboardUnitDetailsModalVisible.value = false;
 });
 
 watch(projectId, (newId) => {
@@ -1098,6 +1132,16 @@ watch([projectApartments, storedDetailedUnitIds], () => {
   height: 100%;
   width: 100%;
   position: relative;
+}
+
+.dashboard-unit-details-action {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.dashboard-unit-details-action .btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
 .layout-notice {

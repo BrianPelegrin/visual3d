@@ -1,22 +1,27 @@
 <template>
-  <transition name="fade-slide">
-    <div v-if="appMode === 'view' && selectedUnit" class="unit-info-glass shadow-lg">
+  <transition :name="isModalMode ? 'modal-fade' : 'fade-slide'">
+    <div
+      v-if="appMode === 'view' && selectedUnit"
+      :class="windowShellClass"
+      @click.self="closeModalFromBackdrop"
+    >
+      <div :class="windowCardClass">
       <div class="glass-header d-flex justify-content-between align-items-center">
-        <div class="d-flex flex-column" @click="toggleMinimize" style="cursor: pointer;">
+        <div class="d-flex flex-column" @click="toggleMinimize" :style="{ cursor: isModalMode ? 'default' : 'pointer' }">
           <div class="d-flex align-items-center gap-2">
             <div class="icon-circle">
-              <i class="bi" :class="isMinimized ? 'bi-chevron-up' : 'bi-door-open-fill'"></i>
+              <i class="bi" :class="isContentCollapsed ? 'bi-chevron-up' : 'bi-door-open-fill'"></i>
             </div>
             <span class="text-uppercase fw-bold ls-1 small tracking-wider">
-              {{ isMinimized ? selectedUnit.name : 'Detalles de la Unidad' }}
+              {{ isContentCollapsed ? selectedUnit.name : 'Detalles de la Unidad' }}
             </span>
           </div>
-          <div v-if="projectName && !isMinimized" class="project-indicator mt-1 animate__animated animate__fadeIn">
+          <div v-if="projectName && !isContentCollapsed" class="project-indicator mt-1 animate__animated animate__fadeIn">
             <i class="bi bi-building-fill-gear"></i> {{ projectName }}
           </div>
         </div>
         <div class="d-flex gap-2">
-          <button class="btn-minimize-custom" @click="toggleMinimize">
+          <button v-if="!isModalMode" class="btn-minimize-custom" @click="toggleMinimize">
             <i class="bi" :class="isMinimized ? 'bi-fullscreen' : 'bi-dash-lg'"></i>
           </button>
           <button class="btn-close-custom" @click="closeWindow">
@@ -25,8 +30,8 @@
         </div>
       </div>
 
-      <div v-show="!isMinimized" class="glass-body-wrapper animate__animated animate__fadeIn">
-        <div class="glass-body">
+      <div v-show="!isContentCollapsed" class="glass-body-wrapper animate__animated animate__fadeIn">
+        <div class="glass-body" style="overflow-y: auto; max-height: 300px;">
         <div class="mb-3">
           <h2 class="unit-title mb-1 text-truncate">{{ selectedUnit.name }}</h2>
           <div class="d-flex align-items-center gap-2">
@@ -208,10 +213,11 @@
       </div>
     </div>
 
-    <div v-show="!isMinimized" class="glass-footer">
+    <div v-show="!isContentCollapsed" class="glass-footer">
         <button class="btn-action-primary" @click="closeWindow">
           Aceptar
         </button>
+      </div>
       </div>
     </div>
   </transition>
@@ -222,10 +228,26 @@ import { computed, ref, watch } from 'vue';
 import { appStore, selectUnit } from '../../store/appStore';
 //import type { UnitStatus } from '../../models/types';
 
+const props = withDefaults(defineProps<{
+  displayMode?: 'popover' | 'modal';
+}>(), {
+  displayMode: 'popover'
+});
+
 const isMinimized = ref(true);
+const isModalMode = computed(() => props.displayMode === 'modal');
+const isContentCollapsed = computed(() => !isModalMode.value && isMinimized.value);
+const windowShellClass = computed(() => isModalMode.value ? 'unit-info-modal-overlay' : 'unit-info-glass shadow-lg');
+const windowCardClass = computed(() => isModalMode.value ? 'unit-info-modal-card shadow-lg' : 'unit-info-popover-card');
 
 const toggleMinimize = () => {
+  if (isModalMode.value) return;
   isMinimized.value = !isMinimized.value;
+};
+
+const closeModalFromBackdrop = () => {
+  if (!isModalMode.value) return;
+  closeWindow();
 };
 
 const selectedUnitId = computed(() => appStore.selectedUnitId);
@@ -233,7 +255,7 @@ const selectedUnitId = computed(() => appStore.selectedUnitId);
 // Reset minimized state when selecting a new unit
 watch(selectedUnitId, (newId) => {
   if (newId) {
-    isMinimized.value = true;
+    isMinimized.value = !isModalMode.value;
   }
 });
 const appMode = computed(() => appStore.appMode);
@@ -306,6 +328,8 @@ const formatDate = (value: string) => {
   transform: translateX(-50%);
   width: min(340px, calc(100% - 32px));
   max-height: calc(100% - 64px);
+  display: flex;
+  flex-direction: column;
   background: rgba(255, 255, 255, 0.75);
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
@@ -317,7 +341,67 @@ const formatDate = (value: string) => {
               inset 0 0 0 1px rgba(255, 255, 255, 0.5);
 }
 
+.unit-info-popover-card,
+.unit-info-modal-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.unit-info-popover-card {
+  width: 100%;
+  height: 100%;
+}
+
+.unit-info-modal-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.unit-info-modal-card {
+  width: min(800px, 100%);
+  max-height: min(90vh, calc(100% - 24px));
+  background: #ffffff;
+  border-radius: 24px;
+  overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+}
+
+.unit-info-modal-card .glass-header {
+  background: #0f172a;
+  color: #ffffff;
+  border-bottom: 0;
+}
+
+.unit-info-modal-card .project-indicator,
+.unit-info-modal-card .btn-close-custom {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.unit-info-modal-card .btn-close-custom:hover {
+  color: #ffffff;
+}
+
+.unit-info-modal-card .glass-body {
+  padding: 24px;
+}
+
+.unit-info-modal-card .glass-footer {
+  padding: 16px 24px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
 .glass-header {
+  flex: 0 0 auto;
   padding: 16px 20px;
   background: rgba(255, 255, 255, 0.3);
   border-bottom: 1px solid rgba(0, 0, 0, 0.05);
@@ -382,10 +466,19 @@ const formatDate = (value: string) => {
   transform: scale(1.1);
 }
 
+.glass-body-wrapper {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .glass-body {
+  box-sizing: border-box;
   padding: 20px;
-  max-height: min(55vh, calc(100vh - 260px));
+  height: 100%;
+  max-height: none;
   overflow-y: auto;
+  overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: rgba(0,0,0,0.15) transparent;
 }
@@ -583,6 +676,10 @@ const formatDate = (value: string) => {
   max-width: 180px;
 }
 
+.unit-info-modal-card .info-value {
+  max-width: min(420px, 58%);
+}
+
 .badge-premium {
   padding: 4px 10px;
   border-radius: 8px;
@@ -639,6 +736,7 @@ const formatDate = (value: string) => {
 }
 
 .glass-footer {
+  flex: 0 0 auto;
   padding: 0 24px 24px;
 }
 
@@ -676,5 +774,30 @@ const formatDate = (value: string) => {
 .fade-slide-leave-to {
   opacity: 0;
   transform: translate(-50%, 40px) scale(0.95);
+}
+
+.modal-fade-enter-active,
+.modal-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.modal-fade-enter-from,
+.modal-fade-leave-to {
+  opacity: 0;
+}
+
+@media (max-width: 768px) {
+  .unit-info-modal-overlay {
+    padding: 12px;
+  }
+
+  .unit-info-modal-card {
+    max-height: calc(100% - 16px);
+    border-radius: 18px;
+  }
+
+  .unit-info-modal-card .glass-body {
+    padding: 18px;
+  }
 }
 </style>
